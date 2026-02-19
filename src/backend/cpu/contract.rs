@@ -82,6 +82,66 @@ use crate::algebra::Algebra;
 use crate::backend::Cpu;
 use crate::tensor::compute_contiguous_strides;
 
+/// Sum (reduce) over specified modes in contiguous tensor data, removing those dimensions.
+///
+/// Uses `A::add` for accumulation so it works correctly with all algebras
+/// (standard addition for `Standard`, max for `MaxPlus`, etc.).
+fn reduce_trace_modes<A: Algebra>(
+    data: &[A::Scalar],
+    shape: &[usize],
+    all_modes: &[i32],
+    trace_modes: &[i32],
+) -> (Vec<A::Scalar>, Vec<usize>, Vec<i32>)
+where
+    A::Scalar: crate::algebra::Scalar,
+{
+    if trace_modes.is_empty() {
+        return (data.to_vec(), shape.to_vec(), all_modes.to_vec());
+    }
+
+    let trace_positions: HashSet<usize> = trace_modes
+        .iter()
+        .map(|m| mode_position(all_modes, *m))
+        .collect();
+
+    // New shape and modes without the trace dimensions
+    let new_shape: Vec<usize> = (0..shape.len())
+        .filter(|i| !trace_positions.contains(i))
+        .map(|i| shape[i])
+        .collect();
+    let new_modes: Vec<i32> = (0..all_modes.len())
+        .filter(|i| !trace_positions.contains(i))
+        .map(|i| all_modes[i])
+        .collect();
+
+    let new_size = new_shape.iter().product::<usize>().max(1);
+    let mut result: Vec<A::Scalar> = vec![A::zero().to_scalar(); new_size];
+
+    let new_strides = compute_contiguous_strides(&new_shape);
+    let old_size = shape.iter().product::<usize>().max(1);
+
+    for old_linear in 0..old_size {
+        // Compute old multi-index (column-major)
+        let mut remaining = old_linear;
+        let mut new_linear = 0usize;
+        let mut new_dim = 0usize;
+        for i in 0..shape.len() {
+            let coord = remaining % shape[i];
+            remaining /= shape[i];
+            if !trace_positions.contains(&i) {
+                new_linear += coord * new_strides[new_dim];
+                new_dim += 1;
+            }
+        }
+
+        let acc = A::from_scalar(result[new_linear]);
+        let val = A::from_scalar(data[old_linear]);
+        result[new_linear] = acc.add(val).to_scalar();
+    }
+
+    (result, new_shape, new_modes)
+}
+
 /// Execute tensor contraction on CPU via reshape→GEMM→reshape.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn contract<A: Algebra>(
@@ -107,23 +167,43 @@ where
     // 2. Classify modes
     let (batch, left, right, contracted) = classify_modes(modes_a, modes_b, modes_c);
 
-    // 3. Compute dimension sizes
-    let batch_size = product_of_dims(&batch, modes_a, shape_a);
-    let left_size = product_of_dims(&left, modes_a, shape_a);
-    let right_size = product_of_dims(&right, modes_b, shape_b);
-    let contract_size = product_of_dims(&contracted, modes_a, shape_a);
+    // 3. Handle trace modes: modes in only one input that are NOT in the output.
+    //    GEMM can only contract modes shared by both inputs. Single-input modes
+    //    not in the output must be summed over (traced) before GEMM.
+    let c_set: HashSet<i32> = modes_c.iter().copied().collect();
+    let left_trace: Vec<i32> = left.iter().filter(|m| !c_set.contains(m)).copied().collect();
+    let right_trace: Vec<i32> = right.iter().filter(|m| !c_set.contains(m)).copied().collect();
 
-    // 4. Permute A to [left, contracted, batch] - batch LAST for correct memory layout
-    // In column-major, the last dimension has the largest stride, so batch elements
-    // are contiguous blocks rather than interleaved.
-    let a_perm = compute_permutation(modes_a, &left, &contracted, &batch);
-    let a_permuted = permute_data(&a_contig, shape_a, &a_perm);
+    let (a_data, a_shape, a_modes) = if !left_trace.is_empty() {
+        reduce_trace_modes::<A>(&a_contig, shape_a, modes_a, &left_trace)
+    } else {
+        (a_contig, shape_a.to_vec(), modes_a.to_vec())
+    };
+    let (b_data, b_shape, b_modes) = if !right_trace.is_empty() {
+        reduce_trace_modes::<A>(&b_contig, shape_b, modes_b, &right_trace)
+    } else {
+        (b_contig, shape_b.to_vec(), modes_b.to_vec())
+    };
 
-    // 5. Permute B to [contracted, right, batch] - batch LAST
-    let b_perm = compute_permutation(modes_b, &contracted, &right, &batch);
-    let b_permuted = permute_data(&b_contig, shape_b, &b_perm);
+    // Free modes (left/right modes that ARE in the output)
+    let left_free: Vec<i32> = left.iter().filter(|m| c_set.contains(m)).copied().collect();
+    let right_free: Vec<i32> = right.iter().filter(|m| c_set.contains(m)).copied().collect();
 
-    // 6. Call GEMM
+    // 4. Compute dimension sizes (using reduced inputs)
+    let batch_size = product_of_dims(&batch, &a_modes, &a_shape);
+    let left_size = product_of_dims(&left_free, &a_modes, &a_shape);
+    let right_size = product_of_dims(&right_free, &b_modes, &b_shape);
+    let contract_size = product_of_dims(&contracted, &a_modes, &a_shape);
+
+    // 5. Permute A to [left_free, contracted, batch] - batch LAST for correct memory layout
+    let a_perm = compute_permutation(&a_modes, &left_free, &contracted, &batch);
+    let a_permuted = permute_data(&a_data, &a_shape, &a_perm);
+
+    // 6. Permute B to [contracted, right_free, batch] - batch LAST
+    let b_perm = compute_permutation(&b_modes, &contracted, &right_free, &batch);
+    let b_permuted = permute_data(&b_data, &b_shape, &b_perm);
+
+    // 7. Call GEMM
     let c_data = if batch.is_empty() {
         cpu.gemm_internal::<A>(
             &a_permuted,
@@ -143,11 +223,11 @@ where
         )
     };
 
-    // 7. Permute result to output order
-    // Result is in [left, right, batch] order
-    let current_order: Vec<i32> = left
+    // 8. Permute result to output order
+    // Result is in [left_free, right_free, batch] order
+    let current_order: Vec<i32> = left_free
         .iter()
-        .chain(right.iter())
+        .chain(right_free.iter())
         .chain(batch.iter())
         .copied()
         .collect();
@@ -258,16 +338,36 @@ where
     let a_contig = ensure_contiguous(a, shape_a, strides_a);
     let b_contig = ensure_contiguous(b, shape_b, strides_b);
     let (batch, left, right, contracted) = classify_modes(modes_a, modes_b, modes_c);
-    let batch_size = product_of_dims(&batch, modes_a, shape_a);
-    let left_size = product_of_dims(&left, modes_a, shape_a);
-    let right_size = product_of_dims(&right, modes_b, shape_b);
-    let contract_size = product_of_dims(&contracted, modes_a, shape_a);
+
+    // Handle trace modes (same as contract)
+    let c_set: HashSet<i32> = modes_c.iter().copied().collect();
+    let left_trace: Vec<i32> = left.iter().filter(|m| !c_set.contains(m)).copied().collect();
+    let right_trace: Vec<i32> = right.iter().filter(|m| !c_set.contains(m)).copied().collect();
+
+    let (a_data, a_shape, a_modes) = if !left_trace.is_empty() {
+        reduce_trace_modes::<A>(&a_contig, shape_a, modes_a, &left_trace)
+    } else {
+        (a_contig, shape_a.to_vec(), modes_a.to_vec())
+    };
+    let (b_data, b_shape, b_modes) = if !right_trace.is_empty() {
+        reduce_trace_modes::<A>(&b_contig, shape_b, modes_b, &right_trace)
+    } else {
+        (b_contig, shape_b.to_vec(), modes_b.to_vec())
+    };
+
+    let left_free: Vec<i32> = left.iter().filter(|m| c_set.contains(m)).copied().collect();
+    let right_free: Vec<i32> = right.iter().filter(|m| c_set.contains(m)).copied().collect();
+
+    let batch_size = product_of_dims(&batch, &a_modes, &a_shape);
+    let left_size = product_of_dims(&left_free, &a_modes, &a_shape);
+    let right_size = product_of_dims(&right_free, &b_modes, &b_shape);
+    let contract_size = product_of_dims(&contracted, &a_modes, &a_shape);
 
     // Permute with batch LAST for correct memory layout
-    let a_perm = compute_permutation(modes_a, &left, &contracted, &batch);
-    let a_permuted = permute_data(&a_contig, shape_a, &a_perm);
-    let b_perm = compute_permutation(modes_b, &contracted, &right, &batch);
-    let b_permuted = permute_data(&b_contig, shape_b, &b_perm);
+    let a_perm = compute_permutation(&a_modes, &left_free, &contracted, &batch);
+    let a_permuted = permute_data(&a_data, &a_shape, &a_perm);
+    let b_perm = compute_permutation(&b_modes, &contracted, &right_free, &batch);
+    let b_permuted = permute_data(&b_data, &b_shape, &b_perm);
 
     // Call GEMM with argmax
     let (c_data, argmax) = if batch.is_empty() {
@@ -289,10 +389,10 @@ where
         )
     };
 
-    // Permute result - result is in [left, right, batch] order
-    let current_order: Vec<i32> = left
+    // Permute result - result is in [left_free, right_free, batch] order
+    let current_order: Vec<i32> = left_free
         .iter()
-        .chain(right.iter())
+        .chain(right_free.iter())
         .chain(batch.iter())
         .copied()
         .collect();
