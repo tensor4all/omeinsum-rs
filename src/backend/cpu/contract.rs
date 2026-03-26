@@ -124,7 +124,7 @@ where
 
     // Slow path: reduce extra modes via algebra addition
     let out_numel: usize = shape_c.iter().product::<usize>().max(1);
-    let mut result = vec![<A as crate::algebra::Semiring>::zero().to_scalar(); out_numel];
+    let mut result = vec![A::zero().to_scalar(); out_numel];
 
     // Precompute loop-invariant data
     let out_strides = compute_contiguous_strides(shape_c);
