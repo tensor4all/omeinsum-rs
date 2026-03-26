@@ -4,7 +4,7 @@
 
 use omeinsum::backend::{Backend, Cpu};
 use omeinsum::tensor::TensorView;
-use omeinsum::{einsum, einsum_with_grad, Standard, Tensor};
+use omeinsum::{einsum, einsum_with_grad, CloneSemiring, Standard, Tensor};
 
 #[cfg(feature = "tropical")]
 use omeinsum::{MaxMul, MaxPlus, MinPlus};

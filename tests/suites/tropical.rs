@@ -2,7 +2,7 @@
 //! Run with: cargo test --test tropical --features tropical
 
 use omeinsum::backend::Cpu;
-use omeinsum::{einsum, MaxMul, MaxPlus, MinPlus, Tensor};
+use omeinsum::{einsum, CloneSemiring, MaxMul, MaxPlus, MinPlus, Tensor};
 
 #[test]
 fn test_maxplus_associativity() {
