@@ -6,7 +6,7 @@ use omeco::{optimize_code, EinCode, GreedyMethod, Label, NestedEinsum, TreeSA};
 
 use crate::algebra::{Algebra, Scalar};
 use crate::backend::{Backend, BackendScalar};
-use crate::tensor::Tensor;
+use crate::tensor::{DenseTensor, Tensor};
 
 /// Einsum specification and execution engine.
 ///
@@ -394,6 +394,207 @@ impl Einsum<usize> {
     }
 }
 
+// =========================================================================
+// CloneSemiring support: contraction for non-Copy semiring types.
+// =========================================================================
+
+impl Einsum<usize> {
+    /// Execute the einsum contraction using a `CloneSemiring` (non-Copy types).
+    ///
+    /// Tensors are `(data, shape)` pairs. Contraction uses generic loops.
+    #[deprecated(note = "Use contract() with DenseTensor instead")]
+    pub fn execute_clone<S: crate::algebra::CloneSemiring>(
+        &self,
+        tensors: &[(Vec<S>, Vec<usize>)],
+    ) -> (Vec<S>, Vec<usize>) {
+        assert_eq!(tensors.len(), self.ixs.len());
+        match &self.optimized {
+            Some(tree) => {
+                if let NestedEinsum::Leaf { tensor_index } = tree {
+                    reduce_clone::<S>(
+                        &tensors[*tensor_index].0,
+                        &tensors[*tensor_index].1,
+                        &self.ixs[*tensor_index],
+                        &self.iy,
+                    )
+                } else {
+                    self.execute_tree_clone::<S>(tree, tensors)
+                }
+            }
+            None => self.execute_pairwise_clone::<S>(tensors),
+        }
+    }
+
+    /// Contract tensors using generic loops. Works for any [`CloneSemiring`] type.
+    ///
+    /// Takes ownership of the tensor vector so the engine can consume
+    /// intermediate results by value during tree execution.
+    #[allow(deprecated)]
+    pub fn contract<S: crate::algebra::CloneSemiring>(
+        &self,
+        tensors: Vec<DenseTensor<S>>,
+    ) -> DenseTensor<S> {
+        let raw: Vec<(Vec<S>, Vec<usize>)> = tensors
+            .into_iter()
+            .map(|t| t.into_data())
+            .collect();
+        let (data, shape) = self.execute_clone(&raw);
+        DenseTensor::from_data(data, shape)
+    }
+
+    #[allow(clippy::only_used_in_recursion)]
+    fn execute_tree_clone<S: crate::algebra::CloneSemiring>(
+        &self,
+        tree: &NestedEinsum<usize>,
+        tensors: &[(Vec<S>, Vec<usize>)],
+    ) -> (Vec<S>, Vec<usize>) {
+        match tree {
+            NestedEinsum::Leaf { tensor_index } => {
+                let (data, shape) = &tensors[*tensor_index];
+                (data.clone(), shape.clone())
+            }
+            NestedEinsum::Node { args, eins } => {
+                let (a_data, a_shape) = self.execute_tree_clone::<S>(&args[0], tensors);
+                let (b_data, b_shape) = self.execute_tree_clone::<S>(&args[1], tensors);
+                contract_clone::<S>(
+                    &a_data, &a_shape, &eins.ixs[0],
+                    &b_data, &b_shape, &eins.ixs[1],
+                    &eins.iy,
+                )
+            }
+        }
+    }
+
+    fn execute_pairwise_clone<S: crate::algebra::CloneSemiring>(
+        &self,
+        tensors: &[(Vec<S>, Vec<usize>)],
+    ) -> (Vec<S>, Vec<usize>) {
+        assert!(!tensors.is_empty());
+        if tensors.len() == 1 {
+            return reduce_clone::<S>(
+                &tensors[0].0, &tensors[0].1, &self.ixs[0], &self.iy,
+            );
+        }
+        let (mut data, mut shape) = tensors[0].clone();
+        let mut current_ix = self.ixs[0].clone();
+        for i in 1..tensors.len() {
+            let iy = if i == tensors.len() - 1 {
+                self.iy.clone()
+            } else {
+                compute_intermediate_output(&current_ix, &self.ixs[i], &self.iy)
+            };
+            let result = contract_clone::<S>(
+                &data, &shape, &current_ix,
+                &tensors[i].0, &tensors[i].1, &self.ixs[i],
+                &iy,
+            );
+            data = result.0;
+            shape = result.1;
+            current_ix = iy;
+        }
+        (data, shape)
+    }
+}
+
+/// Pairwise contraction for `CloneSemiring` types via generic loops.
+fn contract_clone<S: crate::algebra::CloneSemiring>(
+    a_data: &[S], a_shape: &[usize], modes_a: &[usize],
+    b_data: &[S], b_shape: &[usize], modes_b: &[usize],
+    modes_c: &[usize],
+) -> (Vec<S>, Vec<usize>) {
+    // Collect all distinct modes and their sizes
+    let mut all_modes: Vec<usize> = Vec::new();
+    let mut mode_size: HashMap<usize, usize> = HashMap::new();
+    for (i, &m) in modes_a.iter().enumerate() {
+        if !all_modes.contains(&m) {
+            all_modes.push(m);
+            mode_size.insert(m, a_shape[i]);
+        }
+    }
+    for (i, &m) in modes_b.iter().enumerate() {
+        if !all_modes.contains(&m) {
+            all_modes.push(m);
+            mode_size.insert(m, b_shape[i]);
+        }
+    }
+
+    let c_shape: Vec<usize> = modes_c.iter().map(|m| mode_size[m]).collect();
+    let c_numel = c_shape.iter().product::<usize>().max(1);
+    let mut result: Vec<S> = (0..c_numel).map(|_| S::zero()).collect();
+
+    // Precompute strides (column-major)
+    let a_strides = col_major_strides(a_shape);
+    let b_strides = col_major_strides(b_shape);
+    let c_strides = col_major_strides(&c_shape);
+
+    let all_sizes: Vec<usize> = all_modes.iter().map(|m| mode_size[m]).collect();
+    let total: usize = all_sizes.iter().product::<usize>().max(1);
+
+    for idx in 0..total {
+        // Decode linear index → per-mode assignments (column-major)
+        let mut remaining = idx;
+        let mut assignment: HashMap<usize, usize> = HashMap::new();
+        for (i, &m) in all_modes.iter().enumerate() {
+            assignment.insert(m, remaining % all_sizes[i]);
+            remaining /= all_sizes[i];
+        }
+
+        let a_idx: usize = modes_a.iter().enumerate()
+            .map(|(d, &m)| assignment[&m] * a_strides[d]).sum();
+        let b_idx: usize = modes_b.iter().enumerate()
+            .map(|(d, &m)| assignment[&m] * b_strides[d]).sum();
+        let c_idx: usize = modes_c.iter().enumerate()
+            .map(|(d, &m)| assignment[&m] * c_strides[d]).sum();
+
+        let product = a_data[a_idx].clone().mul(b_data[b_idx].clone());
+        result[c_idx] = result[c_idx].clone().add(product);
+    }
+    (result, c_shape)
+}
+
+/// Unary reduction for `CloneSemiring`: sum (⊕) over modes not in the output.
+fn reduce_clone<S: crate::algebra::CloneSemiring>(
+    data: &[S], shape: &[usize], modes_in: &[usize], modes_out: &[usize],
+) -> (Vec<S>, Vec<usize>) {
+    if modes_in == modes_out {
+        return (data.to_vec(), shape.to_vec());
+    }
+    // Build per-mode sizes from input
+    let mode_size: HashMap<usize, usize> = modes_in.iter().zip(shape).map(|(&m, &s)| (m, s)).collect();
+    let out_shape: Vec<usize> = modes_out.iter().map(|m| mode_size[m]).collect();
+    let out_numel = out_shape.iter().product::<usize>().max(1);
+    let mut result: Vec<S> = (0..out_numel).map(|_| S::zero()).collect();
+
+    let out_strides = col_major_strides(&out_shape);
+    let in_numel: usize = shape.iter().product::<usize>().max(1);
+
+    for idx in 0..in_numel {
+        let mut remaining = idx;
+        let mut coords = vec![0; shape.len()];
+        for d in 0..shape.len() {
+            coords[d] = remaining % shape[d];
+            remaining /= shape[d];
+        }
+        let out_idx: usize = modes_out.iter().enumerate()
+            .map(|(oi, &m)| {
+                let pos = modes_in.iter().position(|&x| x == m).unwrap();
+                coords[pos] * out_strides[oi]
+            })
+            .sum();
+        result[out_idx] = result[out_idx].clone().add(data[idx].clone());
+    }
+    (result, out_shape)
+}
+
+/// Column-major strides for a given shape.
+fn col_major_strides(shape: &[usize]) -> Vec<usize> {
+    let mut strides = vec![1; shape.len()];
+    for i in 1..shape.len() {
+        strides[i] = strides[i - 1] * shape[i - 1];
+    }
+    strides
+}
+
 /// Compute intermediate output indices for pairwise contraction.
 fn compute_intermediate_output(ia: &[usize], ib: &[usize], final_output: &[usize]) -> Vec<usize> {
     let final_set: std::collections::HashSet<_> = final_output.iter().copied().collect();
@@ -441,6 +642,54 @@ fn linear_to_multi(mut linear: usize, shape: &[usize]) -> Vec<usize> {
         linear /= shape[i];
     }
     multi
+}
+
+#[cfg(test)]
+mod cross_path_tests {
+    use super::*;
+    use crate::algebra::Standard;
+    use crate::tensor::{DenseTensor, Tensor};
+    use crate::Cpu;
+
+    #[test]
+    fn test_contract_vs_execute_matmul() {
+        // 2x3 @ 3x2 matmul
+        let data_a = vec![1.0f64, 2.0, 3.0, 4.0, 5.0, 6.0];
+        let data_b = vec![7.0f64, 8.0, 9.0, 10.0, 11.0, 12.0];
+
+        // Generic path
+        let dense_a = DenseTensor::from_data(
+            data_a.iter().map(|&x| Standard(x)).collect(),
+            vec![2, 3],
+        );
+        let dense_b = DenseTensor::from_data(
+            data_b.iter().map(|&x| Standard(x)).collect(),
+            vec![3, 2],
+        );
+        let sizes: HashMap<usize, usize> = [(0, 2), (1, 3), (2, 2)].into();
+        let mut ein = Einsum::new(vec![vec![0, 1], vec![1, 2]], vec![0, 2], sizes.clone());
+        ein.optimize_greedy();
+        let result_generic = ein.contract(vec![dense_a, dense_b]);
+
+        // Backend path
+        let tensor_a = Tensor::<f64, Cpu>::from_data(&data_a, &[2, 3]);
+        let tensor_b = Tensor::<f64, Cpu>::from_data(&data_b, &[3, 2]);
+        let mut ein2 = Einsum::new(vec![vec![0, 1], vec![1, 2]], vec![0, 2], sizes);
+        ein2.optimize_greedy();
+        let result_backend = ein2.execute::<Standard<f64>, _, _>(&[&tensor_a, &tensor_b]);
+
+        // Compare
+        assert_eq!(result_generic.shape(), result_backend.shape());
+        for i in 0..result_generic.len() {
+            let generic_val = result_generic.get(i).0;
+            let backend_val = result_backend.get(i);
+            assert!(
+                (generic_val - backend_val).abs() < 1e-10,
+                "Mismatch at index {}: generic={}, backend={}",
+                i, generic_val, backend_val,
+            );
+        }
+    }
 }
 
 /// Compute input tensor position from index values (column-major).
@@ -1343,5 +1592,50 @@ mod tests {
 
         assert_eq!(result.shape(), &[2, 3]);
         assert_eq!(result.to_vec(), vec![3.0, 6.0, 4.0, 8.0, 5.0, 10.0]);
+    }
+}
+
+#[cfg(test)]
+mod contract_tests {
+    use super::*;
+    use crate::algebra::CloneSemiring;
+    use crate::tensor::DenseTensor;
+
+    #[derive(Clone, Debug, PartialEq)]
+    struct SumSemiring(f64);
+
+    impl CloneSemiring for SumSemiring {
+        fn zero() -> Self { SumSemiring(0.0) }
+        fn one() -> Self { SumSemiring(1.0) }
+        fn add(self, rhs: Self) -> Self { SumSemiring(self.0 + rhs.0) }
+        fn mul(self, rhs: Self) -> Self { SumSemiring(self.0 * rhs.0) }
+        fn is_zero(&self) -> bool { self.0 == 0.0 }
+    }
+
+    #[test]
+    fn test_contract_matmul() {
+        // A[i,j] * B[j,k] -> C[i,k], 2x2 matmul
+        let a = DenseTensor::from_data(
+            vec![SumSemiring(1.0), SumSemiring(2.0), SumSemiring(3.0), SumSemiring(4.0)],
+            vec![2, 2], // column-major: [[1,3],[2,4]]
+        );
+        let b = DenseTensor::from_data(
+            vec![SumSemiring(5.0), SumSemiring(6.0), SumSemiring(7.0), SumSemiring(8.0)],
+            vec![2, 2], // column-major: [[5,7],[6,8]]
+        );
+
+        let sizes: HashMap<usize, usize> = [(0, 2), (1, 2), (2, 2)].into();
+        let mut ein = Einsum::new(vec![vec![0, 1], vec![1, 2]], vec![0, 2], sizes);
+        ein.optimize_greedy();
+
+        let result = ein.contract(vec![a, b]);
+        // C = A @ B = [[1*5+3*6, 1*7+3*8], [2*5+4*6, 2*7+4*8]]
+        //           = [[23, 31], [34, 46]]
+        // column-major: [23, 34, 31, 46]
+        assert_eq!(result.shape(), &[2, 2]);
+        assert_eq!(result.get(0).0, 23.0);
+        assert_eq!(result.get(1).0, 34.0);
+        assert_eq!(result.get(2).0, 31.0);
+        assert_eq!(result.get(3).0, 46.0);
     }
 }
