@@ -600,92 +600,146 @@ impl Einsum<usize> {
 }
 
 /// Pairwise contraction for `GenericSemiring` types via generic loops.
+///
+/// All index mapping is precomputed before the hot loop. The inner loop
+/// performs only array indexing, coordinate increment, and semiring ops —
+/// zero heap allocations per iteration.
 fn contract_generic<S: crate::algebra::GenericSemiring>(
     a_data: &[S], a_shape: &[usize], modes_a: &[usize],
     b_data: &[S], b_shape: &[usize], modes_b: &[usize],
     modes_c: &[usize],
 ) -> (Vec<S>, Vec<usize>) {
-    // Collect all distinct modes and their sizes
+    // Collect all distinct modes and their sizes (preserving order)
     let mut all_modes: Vec<usize> = Vec::new();
-    let mut mode_size: HashMap<usize, usize> = HashMap::new();
+    let mut all_sizes: Vec<usize> = Vec::new();
     for (i, &m) in modes_a.iter().enumerate() {
         if !all_modes.contains(&m) {
             all_modes.push(m);
-            mode_size.insert(m, a_shape[i]);
+            all_sizes.push(a_shape[i]);
         }
     }
     for (i, &m) in modes_b.iter().enumerate() {
         if !all_modes.contains(&m) {
             all_modes.push(m);
-            mode_size.insert(m, b_shape[i]);
+            all_sizes.push(b_shape[i]);
         }
     }
+    let ndim = all_modes.len();
 
-    let c_shape: Vec<usize> = modes_c.iter().map(|m| mode_size[m]).collect();
+    // Build mode → position lookup (small array, not HashMap)
+    let max_mode = all_modes.iter().copied().max().unwrap_or(0);
+    let mut mode_to_pos = vec![usize::MAX; max_mode + 1];
+    for (pos, &m) in all_modes.iter().enumerate() {
+        mode_to_pos[m] = pos;
+    }
+
+    // Output shape
+    let c_shape: Vec<usize> = modes_c.iter().map(|&m| all_sizes[mode_to_pos[m]]).collect();
     let c_numel = c_shape.iter().product::<usize>().max(1);
     let mut result: Vec<S> = (0..c_numel).map(|_| S::zero()).collect();
 
-    // Precompute strides (column-major)
+    // Precompute combined stride tables: for each dimension in `all_modes`,
+    // store the corresponding stride contribution to a, b, c.
+    // Non-participating dimensions get stride 0 (no contribution).
     let a_strides = col_major_strides(a_shape);
     let b_strides = col_major_strides(b_shape);
     let c_strides = col_major_strides(&c_shape);
 
-    let all_sizes: Vec<usize> = all_modes.iter().map(|m| mode_size[m]).collect();
+    let mut a_combined = vec![0usize; ndim];
+    for (d, &m) in modes_a.iter().enumerate() {
+        a_combined[mode_to_pos[m]] = a_strides[d];
+    }
+    let mut b_combined = vec![0usize; ndim];
+    for (d, &m) in modes_b.iter().enumerate() {
+        b_combined[mode_to_pos[m]] = b_strides[d];
+    }
+    let mut c_combined = vec![0usize; ndim];
+    for (d, &m) in modes_c.iter().enumerate() {
+        c_combined[mode_to_pos[m]] = c_strides[d];
+    }
+
+    // Hot loop: coordinate counter, no division/modulo, no HashMap
     let total: usize = all_sizes.iter().product::<usize>().max(1);
+    let mut coords = vec![0usize; ndim];
+    let mut a_idx: usize = 0;
+    let mut b_idx: usize = 0;
+    let mut c_idx: usize = 0;
 
-    for idx in 0..total {
-        // Decode linear index → per-mode assignments (column-major)
-        let mut remaining = idx;
-        let mut assignment: HashMap<usize, usize> = HashMap::new();
-        for (i, &m) in all_modes.iter().enumerate() {
-            assignment.insert(m, remaining % all_sizes[i]);
-            remaining /= all_sizes[i];
-        }
-
-        let a_idx: usize = modes_a.iter().enumerate()
-            .map(|(d, &m)| assignment[&m] * a_strides[d]).sum();
-        let b_idx: usize = modes_b.iter().enumerate()
-            .map(|(d, &m)| assignment[&m] * b_strides[d]).sum();
-        let c_idx: usize = modes_c.iter().enumerate()
-            .map(|(d, &m)| assignment[&m] * c_strides[d]).sum();
-
+    for _ in 0..total {
         let product = a_data[a_idx].clone().mul(b_data[b_idx].clone());
         result[c_idx] = result[c_idx].clone().add(product);
+
+        // Increment coordinates (column-major: first dim varies fastest)
+        for d in 0..ndim {
+            coords[d] += 1;
+            if coords[d] < all_sizes[d] {
+                a_idx += a_combined[d];
+                b_idx += b_combined[d];
+                c_idx += c_combined[d];
+                break;
+            }
+            // Carry: reset this dimension, adjust indices, continue to next
+            a_idx -= coords[d] * a_combined[d] - a_combined[d];
+            b_idx -= coords[d] * b_combined[d] - b_combined[d];
+            c_idx -= coords[d] * c_combined[d] - c_combined[d];
+            coords[d] = 0;
+        }
     }
+
     (result, c_shape)
 }
 
 /// Unary reduction for `GenericSemiring`: sum (⊕) over modes not in the output.
+///
+/// Precomputes output stride contributions per input dimension, then
+/// iterates with a coordinate counter — zero allocations in the hot loop.
 fn reduce_generic<S: crate::algebra::GenericSemiring>(
     data: &[S], shape: &[usize], modes_in: &[usize], modes_out: &[usize],
 ) -> (Vec<S>, Vec<usize>) {
     if modes_in == modes_out {
         return (data.to_vec(), shape.to_vec());
     }
-    // Build per-mode sizes from input
-    let mode_size: HashMap<usize, usize> = modes_in.iter().zip(shape).map(|(&m, &s)| (m, s)).collect();
-    let out_shape: Vec<usize> = modes_out.iter().map(|m| mode_size[m]).collect();
+
+    // Build mode → input position lookup
+    let max_mode = modes_in.iter().copied().max().unwrap_or(0);
+    let mut mode_to_in_pos = vec![usize::MAX; max_mode + 1];
+    for (pos, &m) in modes_in.iter().enumerate() {
+        mode_to_in_pos[m] = pos;
+    }
+
+    let out_shape: Vec<usize> = modes_out.iter().map(|&m| shape[mode_to_in_pos[m]]).collect();
     let out_numel = out_shape.iter().product::<usize>().max(1);
     let mut result: Vec<S> = (0..out_numel).map(|_| S::zero()).collect();
 
+    // Precompute: for each input dimension, its stride contribution to the output.
+    // Dimensions being reduced (not in modes_out) get stride 0.
     let out_strides = col_major_strides(&out_shape);
-    let in_numel: usize = shape.iter().product::<usize>().max(1);
-
-    for idx in 0..in_numel {
-        let mut remaining = idx;
-        let mut coords = vec![0; shape.len()];
-        for d in 0..shape.len() {
-            coords[d] = remaining % shape[d];
-            remaining /= shape[d];
-        }
-        let out_idx: usize = modes_out.iter().enumerate()
-            .map(|(oi, &m)| {
-                let pos = modes_in.iter().position(|&x| x == m).unwrap();
-                coords[pos] * out_strides[oi]
-            })
-            .sum();
-        result[out_idx] = result[out_idx].clone().add(data[idx].clone());
+    let ndim_in = shape.len();
+    let mut out_stride_per_in_dim = vec![0usize; ndim_in];
+    for (oi, &m) in modes_out.iter().enumerate() {
+        out_stride_per_in_dim[mode_to_in_pos[m]] = out_strides[oi];
     }
+
+    // Hot loop: coordinate counter
+    let in_numel: usize = shape.iter().product::<usize>().max(1);
+    let mut coords = vec![0usize; ndim_in];
+    let mut out_idx: usize = 0;
+
+    for in_idx in 0..in_numel {
+        result[out_idx] = result[out_idx].clone().add(data[in_idx].clone());
+
+        // Increment coordinates
+        for d in 0..ndim_in {
+            coords[d] += 1;
+            if coords[d] < shape[d] {
+                out_idx += out_stride_per_in_dim[d];
+                break;
+            }
+            out_idx -= coords[d] * out_stride_per_in_dim[d] - out_stride_per_in_dim[d];
+            coords[d] = 0;
+        }
+    }
+
     (result, out_shape)
 }
 
