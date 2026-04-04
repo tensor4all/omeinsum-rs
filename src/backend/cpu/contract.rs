@@ -82,6 +82,81 @@ use crate::algebra::Algebra;
 use crate::backend::Cpu;
 use crate::tensor::compute_contiguous_strides;
 
+/// Look up dimension sizes for each mode in `current_order` from the input mode/shape arrays.
+fn get_current_shape(current_order: &[i32], modes_a: &[i32], shape_a: &[usize], modes_b: &[i32], shape_b: &[usize]) -> Vec<usize> {
+    current_order.iter().map(|&m| {
+        if let Some(pos) = modes_a.iter().position(|&x| x == m) {
+            shape_a[pos]
+        } else {
+            shape_b[mode_position(modes_b, m)]
+        }
+    }).collect()
+}
+
+/// Reorder GEMM result to output mode order, summing (via `Algebra::add`) over
+/// any modes present in the result but absent from the output.
+fn reorder_and_reduce<A: Algebra>(
+    data: &[A::Scalar],
+    current_order: &[i32],
+    current_shape: &[usize],
+    modes_c: &[i32],
+    shape_c: &[usize],
+) -> Vec<A::Scalar>
+where
+    A::Scalar: crate::algebra::Scalar,
+{
+    // Fast path: no extra modes to reduce
+    let c_set: HashSet<i32> = modes_c.iter().copied().collect();
+    if current_order.iter().all(|m| c_set.contains(m)) {
+        if *current_order == *modes_c {
+            return data.to_vec();
+        }
+        let c_shape_current: Vec<usize> = current_order
+            .iter()
+            .map(|&m| shape_c[mode_position(modes_c, m)])
+            .collect();
+        let out_perm: Vec<usize> = modes_c
+            .iter()
+            .map(|m| mode_position(current_order, *m))
+            .collect();
+        return permute_data(data, &c_shape_current, &out_perm);
+    }
+
+    // Slow path: reduce extra modes via algebra addition
+    let out_numel: usize = shape_c.iter().product::<usize>().max(1);
+    let mut result = vec![A::zero().to_scalar(); out_numel];
+
+    // Precompute loop-invariant data
+    let out_strides = compute_contiguous_strides(shape_c);
+    let mode_map: Vec<usize> = modes_c
+        .iter()
+        .map(|&cm| mode_position(current_order, cm))
+        .collect();
+    let ndim = current_shape.len();
+    let mut coords = vec![0usize; ndim];
+
+    let numel: usize = current_shape.iter().product::<usize>().max(1);
+    for idx in 0..numel {
+        // Convert linear index to multi-index (column-major)
+        let mut remaining = idx;
+        for dim in 0..ndim {
+            coords[dim] = remaining % current_shape[dim];
+            remaining /= current_shape[dim];
+        }
+
+        // Compute output linear index using only modes in modes_c
+        let mut out_idx = 0;
+        for (ci, &pos) in mode_map.iter().enumerate() {
+            out_idx += coords[pos] * out_strides[ci];
+        }
+
+        let sum = A::from_scalar(result[out_idx]).add(A::from_scalar(data[idx]));
+        result[out_idx] = sum.to_scalar();
+    }
+
+    result
+}
+
 /// Execute tensor contraction on CPU via reshape→GEMM→reshape.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn contract<A: Algebra>(
@@ -133,7 +208,7 @@ where
         )
     };
 
-    // 7. Permute result to output order
+    // 7. Reduce and permute result to output order
     // Result is in [left, right, batch] order
     let current_order: Vec<i32> = left.iter()
         .chain(right.iter())
@@ -141,19 +216,8 @@ where
         .copied()
         .collect();
 
-    if current_order == modes_c {
-        c_data
-    } else {
-        let c_shape_current: Vec<usize> = current_order
-            .iter()
-            .map(|&m| shape_c[mode_position(modes_c, m)])
-            .collect();
-        let out_perm: Vec<usize> = modes_c
-            .iter()
-            .map(|m| current_order.iter().position(|x| x == m).unwrap())
-            .collect();
-        permute_data(&c_data, &c_shape_current, &out_perm)
-    }
+    let current_shape = get_current_shape(&current_order, modes_a, shape_a, modes_b, shape_b);
+    reorder_and_reduce::<A>(&c_data, &current_order, &current_shape, modes_c, shape_c)
 }
 
 /// Ensure data is contiguous (copy if strided).
@@ -286,21 +350,20 @@ where
         .copied()
         .collect();
 
+    let current_shape = get_current_shape(&current_order, modes_a, shape_a, modes_b, shape_b);
+    let c_data = reorder_and_reduce::<A>(&c_data, &current_order, &current_shape, modes_c, shape_c);
+
+    // Argmax: permute only (reduction over argmax indices is undefined)
     if current_order == modes_c {
         (c_data, argmax)
+    } else if modes_c.is_empty() {
+        (c_data, vec![0u32])
     } else {
-        let c_shape_current: Vec<usize> = current_order
-            .iter()
-            .map(|&m| shape_c[mode_position(modes_c, m)])
-            .collect();
         let out_perm: Vec<usize> = modes_c
             .iter()
-            .map(|m| current_order.iter().position(|x| x == m).unwrap())
+            .map(|&m| mode_position(&current_order, m))
             .collect();
-        (
-            permute_data(&c_data, &c_shape_current, &out_perm),
-            permute_data(&argmax, &c_shape_current, &out_perm),
-        )
+        (c_data, permute_data(&argmax, &current_shape, &out_perm))
     }
 }
 

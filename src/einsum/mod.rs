@@ -164,6 +164,7 @@ impl<T: Scalar + BackendScalar<B>, B: Backend + Default> EinsumGradient<T, B> {
                 &self.ixs[0],
                 &self.ixs[1],
                 &self.iy,
+                &self.size_dict,
             );
 
             return vec![grad_a, grad_b];

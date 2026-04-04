@@ -118,11 +118,12 @@ pub fn contract_binary_backward<A, T, B>(
     ia: &[usize],
     ib: &[usize],
     iy: &[usize],
+    size_dict: &HashMap<usize, usize>,
 ) -> (Tensor<T, B>, Tensor<T, B>)
 where
     A: Algebra<Scalar = T, Index = u32>,
     T: Scalar + BackendScalar<B>,
-    B: Backend,
+    B: Backend + Default,
 {
     if A::needs_argmax() {
         // Tropical backward: route gradients through argmax
@@ -130,7 +131,43 @@ where
         tropical_backward::<A, T, B>(grad_c, a, b, argmax, ia, ib, iy)
     } else {
         // Standard backward: grad_a = grad_c @ b.T, grad_b = a.T @ grad_c
-        standard_backward::<A, T, B>(grad_c, a, b, ia, ib, iy)
+        standard_backward::<A, T, B>(grad_c, a, b, ia, ib, iy, size_dict)
+    }
+}
+
+/// Compute one gradient in a binary contraction backward pass.
+///
+/// For `result[target] = left[left_modes] ⊗ right[right_modes]`, computes the
+/// gradient w.r.t. `target` by contracting `left` with `right`. Falls back to
+/// `execute_unary_naive` when `target` contains modes not in `left_modes ∪ right_modes`.
+fn backward_one_input<A, T, B>(
+    left: &Tensor<T, B>,
+    right: &Tensor<T, B>,
+    left_modes: &[usize],
+    right_modes: &[usize],
+    target: &[usize],
+    size_dict: &HashMap<usize, usize>,
+) -> Tensor<T, B>
+where
+    A: Algebra<Scalar = T, Index = u32>,
+    T: Scalar + BackendScalar<B>,
+    B: Backend + Default,
+{
+    let left_set: std::collections::HashSet<usize> = left_modes.iter().copied().collect();
+    let right_set: std::collections::HashSet<usize> = right_modes.iter().copied().collect();
+
+    if target.iter().all(|m| left_set.contains(m) || right_set.contains(m)) {
+        left.contract_binary::<A>(right, left_modes, right_modes, target)
+    } else {
+        // Build intermediate with all available modes, then reshape to target
+        let mut inter_modes: Vec<usize> = left_modes.to_vec();
+        for &m in right_modes {
+            if !left_set.contains(&m) {
+                inter_modes.push(m);
+            }
+        }
+        let inter = left.contract_binary::<A>(right, left_modes, right_modes, &inter_modes);
+        execute_unary_naive::<A, T, B>(&inter, &inter_modes, target, size_dict)
     }
 }
 
@@ -139,6 +176,12 @@ where
 /// For a contraction C = A @ B (with proper index handling):
 /// - grad_a = grad_c @ b.T  (contracted with b's transpose)
 /// - grad_b = a.T @ grad_c  (a's transpose contracted with grad_c)
+///
+/// When the forward output is scalar (iy=[]), `contract_binary` cannot handle
+/// the backward because output indices of the gradient (ia or ib) may not
+/// appear in either backward input. In this case, we concatenate the forward
+/// inputs into a single tensor via an intermediate einsum and use
+/// `execute_unary_naive` for the index-exchange backward.
 fn standard_backward<A, T, B>(
     grad_c: &Tensor<T, B>,
     a: &Tensor<T, B>,
@@ -146,43 +189,23 @@ fn standard_backward<A, T, B>(
     ia: &[usize],
     ib: &[usize],
     iy: &[usize],
+    size_dict: &HashMap<usize, usize>,
 ) -> (Tensor<T, B>, Tensor<T, B>)
 where
     A: Algebra<Scalar = T, Index = u32>,
     T: Scalar + BackendScalar<B>,
-    B: Backend,
+    B: Backend + Default,
 {
-    // For C[iy] = A[ia] @ B[ib] (contraction over shared indices in ia and ib not in iy):
+    // For C[iy] = A[ia] @ B[ib]:
+    // grad_A[ia] = einsum([iy, ib] -> ia, [grad_C, B])
+    // grad_B[ib] = einsum([ia, iy] -> ib, [A, grad_C])
     //
-    // grad_A[ia] = grad_C[iy] @ B[ib] contracted appropriately
-    // grad_B[ib] = A[ia] @ grad_C[iy] contracted appropriately
-    //
-    // The key insight is:
-    // - To get grad_A, we contract grad_C with B, but now the contracted indices
-    //   are the "right" indices of iy that came from ib, and the output should be ia
-    // - To get grad_B, we contract A with grad_C, and the output should be ib
+    // When all output modes of the backward exist in the backward inputs,
+    // contract_binary handles it directly. Otherwise we fall back to
+    // unary execution on the pre-contracted intermediate.
 
-    // Find contracted indices (in both ia and ib, but not in iy)
-    let contracted: Vec<usize> = ia
-        .iter()
-        .filter(|&i| ib.contains(i) && !iy.contains(i))
-        .copied()
-        .collect();
-
-    // For grad_a: contract grad_c with b to get shape of a
-    // grad_c has indices iy, b has indices ib
-    // We want result with indices ia
-    // The contraction should be over indices that are in both iy and ib (right indices)
-    let grad_a = grad_c.contract_binary::<A>(b, iy, ib, ia);
-
-    // For grad_b: contract a with grad_c to get shape of b
-    // a has indices ia, grad_c has indices iy
-    // We want result with indices ib
-    // The contraction should be over indices that are in both ia and iy (left indices)
-    let grad_b = a.contract_binary::<A>(grad_c, ia, iy, ib);
-
-    let _ = contracted; // Mark as used (for documentation clarity)
-
+    let grad_a = backward_one_input::<A, T, B>(grad_c, b, iy, ib, ia, size_dict);
+    let grad_b = backward_one_input::<A, T, B>(a, grad_c, ia, iy, ib, size_dict);
     (grad_a, grad_b)
 }
 
@@ -440,7 +463,7 @@ where
 
             // Compute gradients for left and right children
             let (grad_left, grad_right) =
-                contract_binary_backward::<A, T, B>(dy, left, right, argmax, ia, ib, iy);
+                contract_binary_backward::<A, T, B>(dy, left, right, argmax, ia, ib, iy, size_dict);
 
             // Recursively back-propagate through children
             let child_grads: Vec<CacheTree<T, B>> = vec![
@@ -655,8 +678,9 @@ mod tests {
         let ib = &[1, 2]; // j, k
         let iy = &[0, 2]; // i, k
 
+        let sizes: HashMap<usize, usize> = [(0, 2), (1, 3), (2, 2)].into();
         let (grad_a, grad_b) =
-            contract_binary_backward::<Standard<f32>, _, _>(&grad_c, &a, &b, None, ia, ib, iy);
+            contract_binary_backward::<Standard<f32>, _, _>(&grad_c, &a, &b, None, ia, ib, iy, &sizes);
 
         // grad_A = grad_C @ B.T
         // B.T = [[1, 2, 3], [4, 5, 6]]
@@ -686,8 +710,9 @@ mod tests {
         let ib = &[1, 2];
         let iy = &[0, 2];
 
+        let sizes: HashMap<usize, usize> = [(0, 2), (1, 2), (2, 2)].into();
         let (grad_a, grad_b) =
-            contract_binary_backward::<Standard<f32>, _, _>(&grad_c, &a, &b, None, ia, ib, iy);
+            contract_binary_backward::<Standard<f32>, _, _>(&grad_c, &a, &b, None, ia, ib, iy, &sizes);
 
         // grad_A = grad_C @ B.T = [[1,0],[0,1]] @ [[5,7],[6,8]] = [[5,7],[6,8]]
         assert_eq!(grad_a.shape(), &[2, 2]);
@@ -727,6 +752,7 @@ mod tests {
         let ib = &[1, 2];
         let iy = &[0, 2];
 
+        let sizes: HashMap<usize, usize> = [(0, 2), (1, 2), (2, 2)].into();
         let (grad_a, grad_b) = contract_binary_backward::<MaxPlus<f32>, _, _>(
             &grad_c,
             &a,
@@ -735,6 +761,7 @@ mod tests {
             ia,
             ib,
             iy,
+            &sizes,
         );
 
         // For tropical backward with argmax all = 1:
@@ -784,6 +811,7 @@ mod tests {
         let ib = &[1, 2];
         let iy = &[0, 2];
 
+        let sizes: HashMap<usize, usize> = [(0, 2), (1, 2), (2, 2)].into();
         let (grad_a, grad_b) = contract_binary_backward::<MaxPlus<f32>, _, _>(
             &grad_c,
             &a,
@@ -792,6 +820,7 @@ mod tests {
             ia,
             ib,
             iy,
+            &sizes,
         );
 
         // argmax (column-major) = [0, 1, 0, 0]
@@ -1292,7 +1321,7 @@ mod tests {
 
     /// Requires omeco fix: https://github.com/GiggleLiu/omeco/issues/13
     #[test]
-    #[ignore = "Requires omeco fix: https://github.com/GiggleLiu/omeco/issues/13"]
+
     fn test_cost_and_gradient_matmul_to_scalar() {
         // A[i,j] @ B[j,k] -> scalar (full contraction)
         // A[2,2], B[2,2] -> scalar by summing over all indices
@@ -1319,7 +1348,7 @@ mod tests {
 
     /// Requires omeco fix: https://github.com/GiggleLiu/omeco/issues/13
     #[test]
-    #[ignore = "Requires omeco fix: https://github.com/GiggleLiu/omeco/issues/13"]
+
     fn test_cost_and_gradient_chain_3_tensors() {
         // A[i,j] @ B[j,k] @ C[k] -> scalar
         // Tests multi-tensor gradient computation
@@ -1440,7 +1469,7 @@ mod tests {
 
     /// Requires omeco fix: https://github.com/GiggleLiu/omeco/issues/13
     #[test]
-    #[ignore = "Requires omeco fix: https://github.com/GiggleLiu/omeco/issues/13"]
+
     fn test_bpcheck_cost_and_gradient_matmul() {
         let a = Tensor::<f64, Cpu>::from_data(&[1.0, 2.0, 3.0, 4.0], &[2, 2]);
         let b = Tensor::<f64, Cpu>::from_data(&[5.0, 6.0, 7.0, 8.0], &[2, 2]);
@@ -1457,7 +1486,7 @@ mod tests {
 
     /// Requires omeco fix: https://github.com/GiggleLiu/omeco/issues/13
     #[test]
-    #[ignore = "Requires omeco fix: https://github.com/GiggleLiu/omeco/issues/13"]
+
     fn test_bpcheck_cost_and_gradient_3_tensor_chain() {
         let a = Tensor::<f64, Cpu>::from_data(&[1.0, 2.0, 3.0, 4.0], &[2, 2]);
         let b = Tensor::<f64, Cpu>::from_data(&[5.0, 6.0, 7.0, 8.0], &[2, 2]);
@@ -1492,7 +1521,7 @@ mod tests {
 
     /// Requires omeco fix: https://github.com/GiggleLiu/omeco/issues/13
     #[test]
-    #[ignore = "Requires omeco fix: https://github.com/GiggleLiu/omeco/issues/13"]
+
     fn test_bpcheck_cost_and_gradient_4_tensors() {
         // 4-tensor chain: A[i,j] @ B[j,k] @ C[k,l] @ D[l] -> scalar
         let a = Tensor::<f64, Cpu>::from_data(&[1.0, 2.0, 3.0, 4.0], &[2, 2]);
@@ -1513,7 +1542,7 @@ mod tests {
     /// Requires omeco fix: https://github.com/GiggleLiu/omeco/issues/13
     #[cfg(feature = "tropical")]
     #[test]
-    #[ignore = "Requires omeco fix: https://github.com/GiggleLiu/omeco/issues/13"]
+    #[ignore = "Tropical backward only implemented for 2D matmul currently"]
     fn test_cost_and_gradient_tropical_matmul() {
         // MaxPlus matmul: C[i,k] = max_j (A[i,j] + B[j,k])
         let a = Tensor::<f64, Cpu>::from_data(&[1.0, 2.0, 3.0, 4.0], &[2, 2]);
@@ -1539,7 +1568,7 @@ mod tests {
     /// Julia test: (ij, jk), ki -> scalar (triangle contraction)
     /// Requires omeco fix: https://github.com/GiggleLiu/omeco/issues/13
     #[test]
-    #[ignore = "Requires omeco fix: https://github.com/GiggleLiu/omeco/issues/13"]
+
     fn test_julia_bp_triangle() {
         // A[2,3], B[3,4], C[4,2] -> scalar
         let a = Tensor::<f64, Cpu>::from_data(
@@ -1568,7 +1597,7 @@ mod tests {
     /// Julia test: matrix-vector product ij, j -> i then sum to scalar
     /// Requires omeco fix: https://github.com/GiggleLiu/omeco/issues/13
     #[test]
-    #[ignore = "Requires omeco fix: https://github.com/GiggleLiu/omeco/issues/13"]
+
     fn test_julia_bp_matvec() {
         let a = Tensor::<f64, Cpu>::from_data(&[1.0, 2.0, 3.0, 4.0], &[2, 2]);
         let v = Tensor::<f64, Cpu>::from_data(&[1.0, 2.0], &[2]);
@@ -1586,7 +1615,7 @@ mod tests {
     /// Julia test: contract to 0-dim array (ij, ij) -> scalar
     /// Requires omeco fix: https://github.com/GiggleLiu/omeco/issues/13
     #[test]
-    #[ignore = "Requires omeco fix: https://github.com/GiggleLiu/omeco/issues/13"]
+
     fn test_julia_bp_contract_to_scalar() {
         let a = Tensor::<f64, Cpu>::from_data(&[1.0, 2.0, 3.0, 4.0], &[2, 2]);
         let b = Tensor::<f64, Cpu>::from_data(&[5.0, 6.0, 7.0, 8.0], &[2, 2]);
@@ -1695,7 +1724,7 @@ mod tests {
     /// Julia test: tensor contraction (abcd, bc) -> (ad) then sum to scalar
     /// Requires omeco fix: https://github.com/GiggleLiu/omeco/issues/13
     #[test]
-    #[ignore = "Requires omeco fix: https://github.com/GiggleLiu/omeco/issues/13"]
+
     fn test_julia_bp_tensor_contraction() {
         let t = Tensor::<f64, Cpu>::from_data(
             &(1..=16).map(|x| x as f64).collect::<Vec<_>>(),
@@ -1716,7 +1745,7 @@ mod tests {
     /// Julia test: star contraction (ia, ib, ic) -> (abc) then sum to scalar
     /// Requires omeco fix: https://github.com/GiggleLiu/omeco/issues/13
     #[test]
-    #[ignore = "Requires omeco fix: https://github.com/GiggleLiu/omeco/issues/13"]
+
     fn test_julia_bp_star() {
         let a = Tensor::<f64, Cpu>::from_data(&[1.0, 2.0, 3.0, 4.0], &[2, 2]);
         let b = Tensor::<f64, Cpu>::from_data(&[5.0, 6.0, 7.0, 8.0], &[2, 2]);
@@ -1735,7 +1764,7 @@ mod tests {
     /// Julia test: Hadamard product (ij, ij) -> ij then sum to scalar
     /// Requires omeco fix: https://github.com/GiggleLiu/omeco/issues/13
     #[test]
-    #[ignore = "Requires omeco fix: https://github.com/GiggleLiu/omeco/issues/13"]
+
     fn test_julia_bp_hadamard() {
         let a = Tensor::<f64, Cpu>::from_data(&[1.0, 2.0, 3.0, 4.0], &[2, 2]);
         let b = Tensor::<f64, Cpu>::from_data(&[5.0, 6.0, 7.0, 8.0], &[2, 2]);
@@ -1754,7 +1783,7 @@ mod tests {
     /// Julia test: outer product (ij, kl) -> (ijkl) then sum to scalar
     /// Requires omeco fix: https://github.com/GiggleLiu/omeco/issues/13
     #[test]
-    #[ignore = "Requires omeco fix: https://github.com/GiggleLiu/omeco/issues/13"]
+
     fn test_julia_bp_outer() {
         let a = Tensor::<f64, Cpu>::from_data(&[1.0, 2.0, 3.0, 4.0], &[2, 2]);
         let b = Tensor::<f64, Cpu>::from_data(&[5.0, 6.0, 7.0, 8.0], &[2, 2]);
@@ -1773,7 +1802,7 @@ mod tests {
     /// Julia test: chain ij, jk, kl -> il then sum to scalar
     /// Requires omeco fix: https://github.com/GiggleLiu/omeco/issues/13
     #[test]
-    #[ignore = "Requires omeco fix: https://github.com/GiggleLiu/omeco/issues/13"]
+
     fn test_julia_bp_chain_3() {
         let a = Tensor::<f64, Cpu>::from_data(&[1.0, 2.0, 3.0, 4.0], &[2, 2]);
         let b = Tensor::<f64, Cpu>::from_data(&[5.0, 6.0, 7.0, 8.0], &[2, 2]);
@@ -1798,7 +1827,7 @@ mod tests {
     /// Currently fails because omeco returns a tree with iy=[0,2] instead of iy=[].
     /// Tracked in: https://github.com/GiggleLiu/omeco/issues/13
     #[test]
-    #[ignore = "Waiting for omeco fix: https://github.com/GiggleLiu/omeco/issues/13"]
+
     fn test_omeco_respects_final_iy() {
         use omeco::{optimize_code, EinCode, GreedyMethod, NestedEinsum};
 

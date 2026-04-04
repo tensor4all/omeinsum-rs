@@ -2,7 +2,7 @@
 
 use super::Scalar;
 
-/// A semiring defines two binary operations (⊕, ⊗) with identities.
+/// Base semiring trait for tensor contraction. Allows heap-allocated types.
 ///
 /// # Semiring Laws
 ///
@@ -20,30 +20,29 @@ use super::Scalar;
 /// | MaxPlus  | max | + | -∞ | 0 |
 /// | MinPlus  | min | + | +∞ | 0 |
 /// | MaxMul   | max | × | 0 | 1 |
-pub trait Semiring: Copy + Clone + Send + Sync + 'static {
-    /// The underlying scalar type
-    type Scalar: Scalar;
-
+pub trait GenericSemiring: Clone + Send + Sync + 'static {
     /// Additive identity (zero element for ⊕)
     fn zero() -> Self;
-
     /// Multiplicative identity (one element for ⊗)
     fn one() -> Self;
-
     /// Addition operation (⊕)
     fn add(self, rhs: Self) -> Self;
-
     /// Multiplication operation (⊗)
     fn mul(self, rhs: Self) -> Self;
-
-    /// Create from scalar value
-    fn from_scalar(s: Self::Scalar) -> Self;
-
-    /// Extract scalar value
-    fn to_scalar(self) -> Self::Scalar;
-
     /// Check if this is the zero element
     fn is_zero(&self) -> bool;
+}
+
+/// Copy semiring with scalar conversion. Enables GEMM optimization.
+///
+/// Extends [`GenericSemiring`] with `Copy` and scalar bridging for BLAS backends.
+pub trait Semiring: GenericSemiring + Copy {
+    /// The underlying scalar type
+    type Scalar: Scalar;
+    /// Create from scalar value
+    fn from_scalar(s: Self::Scalar) -> Self;
+    /// Extract scalar value
+    fn to_scalar(self) -> Self::Scalar;
 }
 
 /// Extended semiring operations for automatic differentiation.
