@@ -406,7 +406,7 @@ impl Einsum<usize> {
     ///
     /// This is the non-Copy counterpart to [`execute`]. Use this for semiring
     /// types that carry heap allocations (e.g. `ConfigEnumerator`).
-    pub fn execute_clone<S: crate::algebra::CloneSemiring>(
+    pub fn execute_generic<S: crate::algebra::CloneSemiring>(
         &self,
         tensors: &[(Vec<S>, Vec<usize>)],
     ) -> (Vec<S>, Vec<usize>) {
@@ -414,22 +414,22 @@ impl Einsum<usize> {
         match &self.optimized {
             Some(tree) => {
                 if let NestedEinsum::Leaf { tensor_index } = tree {
-                    reduce_clone::<S>(
+                    reduce_generic::<S>(
                         &tensors[*tensor_index].0,
                         &tensors[*tensor_index].1,
                         &self.ixs[*tensor_index],
                         &self.iy,
                     )
                 } else {
-                    self.execute_tree_clone::<S>(tree, tensors)
+                    self.execute_tree_generic::<S>(tree, tensors)
                 }
             }
-            None => self.execute_pairwise_clone::<S>(tensors),
+            None => self.execute_pairwise_generic::<S>(tensors),
         }
     }
 
     #[allow(clippy::only_used_in_recursion)]
-    fn execute_tree_clone<S: crate::algebra::CloneSemiring>(
+    fn execute_tree_generic<S: crate::algebra::CloneSemiring>(
         &self,
         tree: &NestedEinsum<usize>,
         tensors: &[(Vec<S>, Vec<usize>)],
@@ -440,9 +440,9 @@ impl Einsum<usize> {
                 (data.clone(), shape.clone())
             }
             NestedEinsum::Node { args, eins } => {
-                let (a_data, a_shape) = self.execute_tree_clone::<S>(&args[0], tensors);
-                let (b_data, b_shape) = self.execute_tree_clone::<S>(&args[1], tensors);
-                contract_clone::<S>(
+                let (a_data, a_shape) = self.execute_tree_generic::<S>(&args[0], tensors);
+                let (b_data, b_shape) = self.execute_tree_generic::<S>(&args[1], tensors);
+                contract_generic::<S>(
                     &a_data, &a_shape, &eins.ixs[0],
                     &b_data, &b_shape, &eins.ixs[1],
                     &eins.iy,
@@ -451,13 +451,13 @@ impl Einsum<usize> {
         }
     }
 
-    fn execute_pairwise_clone<S: crate::algebra::CloneSemiring>(
+    fn execute_pairwise_generic<S: crate::algebra::CloneSemiring>(
         &self,
         tensors: &[(Vec<S>, Vec<usize>)],
     ) -> (Vec<S>, Vec<usize>) {
         assert!(!tensors.is_empty());
         if tensors.len() == 1 {
-            return reduce_clone::<S>(
+            return reduce_generic::<S>(
                 &tensors[0].0, &tensors[0].1, &self.ixs[0], &self.iy,
             );
         }
@@ -469,7 +469,7 @@ impl Einsum<usize> {
             } else {
                 compute_intermediate_output(&current_ix, &self.ixs[i], &self.iy)
             };
-            let result = contract_clone::<S>(
+            let result = contract_generic::<S>(
                 &data, &shape, &current_ix,
                 &tensors[i].0, &tensors[i].1, &self.ixs[i],
                 &iy,
@@ -483,7 +483,7 @@ impl Einsum<usize> {
 }
 
 /// Pairwise contraction for `CloneSemiring` types via generic loops.
-fn contract_clone<S: crate::algebra::CloneSemiring>(
+fn contract_generic<S: crate::algebra::CloneSemiring>(
     a_data: &[S], a_shape: &[usize], modes_a: &[usize],
     b_data: &[S], b_shape: &[usize], modes_b: &[usize],
     modes_c: &[usize],
@@ -539,7 +539,7 @@ fn contract_clone<S: crate::algebra::CloneSemiring>(
 }
 
 /// Unary reduction for `CloneSemiring`: sum (⊕) over modes not in the output.
-fn reduce_clone<S: crate::algebra::CloneSemiring>(
+fn reduce_generic<S: crate::algebra::CloneSemiring>(
     data: &[S], shape: &[usize], modes_in: &[usize], modes_out: &[usize],
 ) -> (Vec<S>, Vec<usize>) {
     if modes_in == modes_out {
@@ -638,7 +638,7 @@ mod cross_path_tests {
     use crate::Cpu;
 
     #[test]
-    fn test_execute_clone_vs_execute_matmul() {
+    fn test_execute_generic_vs_execute_matmul() {
         // 2x3 @ 3x2 matmul
         let data_a = vec![1.0f64, 2.0, 3.0, 4.0, 5.0, 6.0];
         let data_b = vec![7.0f64, 8.0, 9.0, 10.0, 11.0, 12.0];
@@ -653,7 +653,7 @@ mod cross_path_tests {
         let sizes: HashMap<usize, usize> = [(0, 2), (1, 3), (2, 2)].into();
         let mut ein = Einsum::new(vec![vec![0, 1], vec![1, 2]], vec![0, 2], sizes.clone());
         ein.optimize_greedy();
-        let (result_data, result_shape) = ein.execute_clone(&tensors_clone);
+        let (result_data, result_shape) = ein.execute_generic(&tensors_clone);
 
         // Backend (GEMM) path
         let tensor_a = Tensor::<f64, Cpu>::from_data(&data_a, &[2, 3]);
@@ -1580,7 +1580,7 @@ mod tests {
 }
 
 #[cfg(test)]
-mod execute_clone_tests {
+mod execute_generic_tests {
     use super::*;
     use crate::algebra::CloneSemiring;
 
@@ -1596,7 +1596,7 @@ mod execute_clone_tests {
     }
 
     #[test]
-    fn test_execute_clone_matmul() {
+    fn test_execute_generic_matmul() {
         // A[i,j] * B[j,k] -> C[i,k], 2x2 matmul
         let a = (
             vec![SumSemiring(1.0), SumSemiring(2.0), SumSemiring(3.0), SumSemiring(4.0)],
@@ -1611,7 +1611,7 @@ mod execute_clone_tests {
         let mut ein = Einsum::new(vec![vec![0, 1], vec![1, 2]], vec![0, 2], sizes);
         ein.optimize_greedy();
 
-        let (result_data, result_shape) = ein.execute_clone(&[a, b]);
+        let (result_data, result_shape) = ein.execute_generic(&[a, b]);
         // C = A @ B = [[1*5+3*6, 1*7+3*8], [2*5+4*6, 2*7+4*8]]
         //           = [[23, 31], [34, 46]]
         // column-major: [23, 34, 31, 46]
