@@ -6,7 +6,7 @@ use omeco::{optimize_code, EinCode, GreedyMethod, Label, NestedEinsum, TreeSA};
 
 use crate::algebra::{Algebra, Scalar};
 use crate::backend::{Backend, BackendScalar};
-use crate::tensor::{DenseTensor, Tensor};
+use crate::tensor::Tensor;
 
 /// Einsum specification and execution engine.
 ///
@@ -399,8 +399,14 @@ impl Einsum<usize> {
 // =========================================================================
 
 impl Einsum<usize> {
-    /// Internal: execute contraction on raw `(Vec<S>, Vec<usize>)` pairs.
-    fn execute_clone<S: crate::algebra::CloneSemiring>(
+    /// Execute the einsum contraction for [`CloneSemiring`] types via generic loops.
+    ///
+    /// Each tensor is a `(data, shape)` pair with data in column-major order.
+    /// Returns the contracted result as `(data, shape)`.
+    ///
+    /// This is the non-Copy counterpart to [`execute`]. Use this for semiring
+    /// types that carry heap allocations (e.g. `ConfigEnumerator`).
+    pub fn execute_clone<S: crate::algebra::CloneSemiring>(
         &self,
         tensors: &[(Vec<S>, Vec<usize>)],
     ) -> (Vec<S>, Vec<usize>) {
@@ -420,22 +426,6 @@ impl Einsum<usize> {
             }
             None => self.execute_pairwise_clone::<S>(tensors),
         }
-    }
-
-    /// Contract tensors using generic loops. Works for any [`CloneSemiring`] type.
-    ///
-    /// Takes ownership of the tensor vector so the engine can consume
-    /// intermediate results by value during tree execution.
-    pub fn contract<S: crate::algebra::CloneSemiring>(
-        &self,
-        tensors: Vec<DenseTensor<S>>,
-    ) -> DenseTensor<S> {
-        let raw: Vec<(Vec<S>, Vec<usize>)> = tensors
-            .into_iter()
-            .map(|t| t.into_data())
-            .collect();
-        let (data, shape) = self.execute_clone(&raw);
-        DenseTensor::from_data(data, shape)
     }
 
     #[allow(clippy::only_used_in_recursion)]
@@ -644,30 +634,28 @@ fn linear_to_multi(mut linear: usize, shape: &[usize]) -> Vec<usize> {
 mod cross_path_tests {
     use super::*;
     use crate::algebra::Standard;
-    use crate::tensor::{DenseTensor, Tensor};
+    use crate::tensor::Tensor;
     use crate::Cpu;
 
     #[test]
-    fn test_contract_vs_execute_matmul() {
+    fn test_execute_clone_vs_execute_matmul() {
         // 2x3 @ 3x2 matmul
         let data_a = vec![1.0f64, 2.0, 3.0, 4.0, 5.0, 6.0];
         let data_b = vec![7.0f64, 8.0, 9.0, 10.0, 11.0, 12.0];
 
-        // Generic path
-        let dense_a = DenseTensor::from_data(
-            data_a.iter().map(|&x| Standard(x)).collect(),
-            vec![2, 3],
-        );
-        let dense_b = DenseTensor::from_data(
-            data_b.iter().map(|&x| Standard(x)).collect(),
-            vec![3, 2],
-        );
+        // Generic (CloneSemiring) path
+        let clone_a: Vec<Standard<f64>> = data_a.iter().map(|&x| Standard(x)).collect();
+        let clone_b: Vec<Standard<f64>> = data_b.iter().map(|&x| Standard(x)).collect();
+        let tensors_clone = vec![
+            (clone_a, vec![2, 3]),
+            (clone_b, vec![3, 2]),
+        ];
         let sizes: HashMap<usize, usize> = [(0, 2), (1, 3), (2, 2)].into();
         let mut ein = Einsum::new(vec![vec![0, 1], vec![1, 2]], vec![0, 2], sizes.clone());
         ein.optimize_greedy();
-        let result_generic = ein.contract(vec![dense_a, dense_b]);
+        let (result_data, result_shape) = ein.execute_clone(&tensors_clone);
 
-        // Backend path
+        // Backend (GEMM) path
         let tensor_a = Tensor::<f64, Cpu>::from_data(&data_a, &[2, 3]);
         let tensor_b = Tensor::<f64, Cpu>::from_data(&data_b, &[3, 2]);
         let mut ein2 = Einsum::new(vec![vec![0, 1], vec![1, 2]], vec![0, 2], sizes);
@@ -675,9 +663,9 @@ mod cross_path_tests {
         let result_backend = ein2.execute::<Standard<f64>, _, _>(&[&tensor_a, &tensor_b]);
 
         // Compare
-        assert_eq!(result_generic.shape(), result_backend.shape());
-        for i in 0..result_generic.len() {
-            let generic_val = result_generic.get(i).0;
+        assert_eq!(result_shape.as_slice(), result_backend.shape());
+        for i in 0..result_data.len() {
+            let generic_val = result_data[i].0;
             let backend_val = result_backend.get(i);
             assert!(
                 (generic_val - backend_val).abs() < 1e-10,
@@ -1592,10 +1580,9 @@ mod tests {
 }
 
 #[cfg(test)]
-mod contract_tests {
+mod execute_clone_tests {
     use super::*;
     use crate::algebra::CloneSemiring;
-    use crate::tensor::DenseTensor;
 
     #[derive(Clone, Debug, PartialEq)]
     struct SumSemiring(f64);
@@ -1609,13 +1596,13 @@ mod contract_tests {
     }
 
     #[test]
-    fn test_contract_matmul() {
+    fn test_execute_clone_matmul() {
         // A[i,j] * B[j,k] -> C[i,k], 2x2 matmul
-        let a = DenseTensor::from_data(
+        let a = (
             vec![SumSemiring(1.0), SumSemiring(2.0), SumSemiring(3.0), SumSemiring(4.0)],
             vec![2, 2], // column-major: [[1,3],[2,4]]
         );
-        let b = DenseTensor::from_data(
+        let b = (
             vec![SumSemiring(5.0), SumSemiring(6.0), SumSemiring(7.0), SumSemiring(8.0)],
             vec![2, 2], // column-major: [[5,7],[6,8]]
         );
@@ -1624,14 +1611,14 @@ mod contract_tests {
         let mut ein = Einsum::new(vec![vec![0, 1], vec![1, 2]], vec![0, 2], sizes);
         ein.optimize_greedy();
 
-        let result = ein.contract(vec![a, b]);
+        let (result_data, result_shape) = ein.execute_clone(&[a, b]);
         // C = A @ B = [[1*5+3*6, 1*7+3*8], [2*5+4*6, 2*7+4*8]]
         //           = [[23, 31], [34, 46]]
         // column-major: [23, 34, 31, 46]
-        assert_eq!(result.shape(), &[2, 2]);
-        assert_eq!(result.get(0).0, 23.0);
-        assert_eq!(result.get(1).0, 34.0);
-        assert_eq!(result.get(2).0, 31.0);
-        assert_eq!(result.get(3).0, 46.0);
+        assert_eq!(result_shape, vec![2, 2]);
+        assert_eq!(result_data[0].0, 23.0);
+        assert_eq!(result_data[1].0, 34.0);
+        assert_eq!(result_data[2].0, 31.0);
+        assert_eq!(result_data[3].0, 46.0);
     }
 }
