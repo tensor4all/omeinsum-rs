@@ -399,11 +399,8 @@ impl Einsum<usize> {
 // =========================================================================
 
 impl Einsum<usize> {
-    /// Execute the einsum contraction using a `CloneSemiring` (non-Copy types).
-    ///
-    /// Tensors are `(data, shape)` pairs. Contraction uses generic loops.
-    #[deprecated(note = "Use contract() with DenseTensor instead")]
-    pub fn execute_clone<S: crate::algebra::CloneSemiring>(
+    /// Internal: execute contraction on raw `(Vec<S>, Vec<usize>)` pairs.
+    fn execute_clone<S: crate::algebra::CloneSemiring>(
         &self,
         tensors: &[(Vec<S>, Vec<usize>)],
     ) -> (Vec<S>, Vec<usize>) {
@@ -429,7 +426,6 @@ impl Einsum<usize> {
     ///
     /// Takes ownership of the tensor vector so the engine can consume
     /// intermediate results by value during tree execution.
-    #[allow(deprecated)]
     pub fn contract<S: crate::algebra::CloneSemiring>(
         &self,
         tensors: Vec<DenseTensor<S>>,

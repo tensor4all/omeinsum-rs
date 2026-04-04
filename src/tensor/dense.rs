@@ -54,6 +54,11 @@ impl<S: CloneSemiring> DenseTensor<S> {
         &self.shape
     }
 
+    /// Number of dimensions.
+    pub fn ndim(&self) -> usize {
+        self.shape.len()
+    }
+
     /// Access element by flat (column-major) index.
     pub fn get(&self, index: usize) -> &S {
         &self.data[index]
