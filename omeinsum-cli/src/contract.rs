@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::io::{self, IsTerminal, Write};
 
 use num_complex::{Complex32, Complex64};
+use omeco::NestedEinsum;
 use omeinsum::algebra::Standard;
 use omeinsum::{Algebra, BackendScalar, Cpu, Einsum, Tensor};
 
@@ -193,6 +194,7 @@ where
                 .map_err(|_| format!("Invalid size_dict key '{key}'"))
         })
         .collect::<Result<_, _>>()?;
+    validate_topology_tree(&topology.tree, tensors.len(), &size_dict)?;
 
     let parsed = parse_flat(&topology.expression)?;
     if tensors.len() != parsed.ixs.len() {
@@ -262,6 +264,43 @@ fn validate_shape(data: &[f64], shape: &[usize], is_complex: bool) -> Result<(),
         ));
     }
     Ok(())
+}
+
+fn validate_topology_tree(
+    tree: &NestedEinsum<usize>,
+    num_tensors: usize,
+    size_dict: &HashMap<usize, usize>,
+) -> Result<(), String> {
+    match tree {
+        NestedEinsum::Leaf { tensor_index } => {
+            if *tensor_index >= num_tensors {
+                return Err(format!(
+                    "Topology leaf tensor_index {} out of range for {} tensors",
+                    tensor_index, num_tensors
+                ));
+            }
+            Ok(())
+        }
+        NestedEinsum::Node { args, eins } => {
+            if args.len() != 2 {
+                return Err(format!(
+                    "Topology tree must be binary, found node with {} children",
+                    args.len()
+                ));
+            }
+
+            for label in eins.ixs.iter().flatten().chain(eins.iy.iter()) {
+                if !size_dict.contains_key(label) {
+                    return Err(format!("Topology references unknown label index {}", label));
+                }
+            }
+
+            for arg in args {
+                validate_topology_tree(arg, num_tensors, size_dict)?;
+            }
+            Ok(())
+        }
+    }
 }
 
 fn interleaved_to_complex<T>(data: &[f64], make_complex: fn(f64, f64) -> T) -> Vec<T> {

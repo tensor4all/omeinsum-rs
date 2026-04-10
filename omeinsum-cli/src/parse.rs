@@ -82,6 +82,7 @@ pub struct ParsedTree {
     /// Output labels.
     pub iy: Vec<usize>,
     /// Maps single-char labels to usize indices.
+    #[cfg_attr(not(test), allow(dead_code))]
     pub label_map: HashMap<char, usize>,
 }
 
