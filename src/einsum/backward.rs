@@ -22,6 +22,149 @@ use super::engine::{
     compute_normalized_binary_indices, execute_unary_naive, execute_unary_with_argmax,
 };
 
+fn infer_binary_size_dict<T, B>(
+    grad_c: &Tensor<T, B>,
+    iy: &[usize],
+    a: &Tensor<T, B>,
+    ia: &[usize],
+    b: &Tensor<T, B>,
+    ib: &[usize],
+) -> HashMap<usize, usize>
+where
+    T: Scalar,
+    B: Backend,
+{
+    fn record_sizes(
+        size_dict: &mut HashMap<usize, usize>,
+        indices: &[usize],
+        shape: &[usize],
+        tensor_name: &str,
+    ) {
+        assert_eq!(
+            indices.len(),
+            shape.len(),
+            "Index count {} doesn't match shape {:?} for {}",
+            indices.len(),
+            shape,
+            tensor_name
+        );
+
+        for (&label, &size) in indices.iter().zip(shape.iter()) {
+            if let Some(existing) = size_dict.insert(label, size) {
+                assert_eq!(
+                    existing, size,
+                    "Inconsistent size for label {}: {} vs {}",
+                    label, existing, size
+                );
+            }
+        }
+    }
+
+    let mut size_dict = HashMap::new();
+    record_sizes(&mut size_dict, iy, grad_c.shape(), "grad_c");
+    record_sizes(&mut size_dict, ia, a.shape(), "a");
+    record_sizes(&mut size_dict, ib, b.shape(), "b");
+    size_dict
+}
+
+fn linear_to_coords(mut linear: usize, shape: &[usize]) -> Vec<usize> {
+    let mut coords = Vec::with_capacity(shape.len());
+    for &dim in shape {
+        coords.push(linear % dim);
+        linear /= dim;
+    }
+    coords
+}
+
+fn coords_to_linear(coords: &[usize], shape: &[usize]) -> usize {
+    let mut stride = 1usize;
+    let mut linear = 0usize;
+    for (&coord, &dim) in coords.iter().zip(shape.iter()) {
+        debug_assert!(coord < dim);
+        linear += coord * stride;
+        stride *= dim;
+    }
+    linear
+}
+
+fn tropical_backward_normalized<T, B>(
+    grad_c: &Tensor<T, B>,
+    a: &Tensor<T, B>,
+    b: &Tensor<T, B>,
+    argmax: &Tensor<u32, B>,
+    ia: &[usize],
+    ib: &[usize],
+    iy: &[usize],
+) -> (Tensor<T, B>, Tensor<T, B>)
+where
+    T: Scalar,
+    B: Backend,
+{
+    let size_dict = infer_binary_size_dict(grad_c, iy, a, ia, b, ib);
+    let contracted: Vec<usize> = ia
+        .iter()
+        .filter(|label| ib.contains(label) && !iy.contains(label))
+        .copied()
+        .collect();
+    let contracted_shape: Vec<usize> = contracted.iter().map(|label| size_dict[label]).collect();
+
+    let grad_c_vec = grad_c.contiguous().to_vec();
+    let argmax_vec = argmax.contiguous().to_vec();
+    let mut grad_a_vec = vec![T::default(); a.numel()];
+    let mut grad_b_vec = vec![T::default(); b.numel()];
+
+    for (out_linear, &grad_val) in grad_c_vec.iter().enumerate() {
+        let output_coords = linear_to_coords(out_linear, grad_c.shape());
+        let winner_coords = linear_to_coords(argmax_vec[out_linear] as usize, &contracted_shape);
+
+        let output_positions: HashMap<usize, usize> =
+            iy.iter().copied().zip(output_coords.into_iter()).collect();
+        let contracted_positions: HashMap<usize, usize> = contracted
+            .iter()
+            .copied()
+            .zip(winner_coords.into_iter())
+            .collect();
+
+        let a_coords: Vec<usize> = ia
+            .iter()
+            .map(|label| {
+                output_positions
+                    .get(label)
+                    .copied()
+                    .or_else(|| contracted_positions.get(label).copied())
+                    .expect("normalized tropical backward saw label outside output/contracted sets")
+            })
+            .collect();
+        let b_coords: Vec<usize> = ib
+            .iter()
+            .map(|label| {
+                output_positions
+                    .get(label)
+                    .copied()
+                    .or_else(|| contracted_positions.get(label).copied())
+                    .expect("normalized tropical backward saw label outside output/contracted sets")
+            })
+            .collect();
+
+        let a_linear = coords_to_linear(&a_coords, a.shape());
+        let b_linear = coords_to_linear(&b_coords, b.shape());
+        grad_a_vec[a_linear] += grad_val;
+        grad_b_vec[b_linear] += grad_val;
+    }
+
+    let grad_a = Tensor::from_storage(
+        B::Storage::from_slice(&grad_a_vec),
+        a.shape(),
+        a.backend().clone(),
+    );
+    let grad_b = Tensor::from_storage(
+        B::Storage::from_slice(&grad_b_vec),
+        b.shape(),
+        b.backend().clone(),
+    );
+    (grad_a, grad_b)
+}
+
 /// Compute gradient for a unary einsum operation.
 ///
 /// Uses the index-exchange trick: backward(ix -> iy) = forward(iy -> ix).
@@ -154,36 +297,36 @@ where
     T: Scalar + BackendScalar<B>,
     B: Backend,
 {
-    // For C[iy] = A[ia] @ B[ib] (contraction over shared indices in ia and ib not in iy):
-    //
-    // grad_A[ia] = grad_C[iy] @ B[ib] contracted appropriately
-    // grad_B[ib] = A[ia] @ grad_C[iy] contracted appropriately
-    //
-    // The key insight is:
-    // - To get grad_A, we contract grad_C with B, but now the contracted indices
-    //   are the "right" indices of iy that came from ib, and the output should be ia
-    // - To get grad_B, we contract A with grad_C, and the output should be ib
+    let size_dict = infer_binary_size_dict(grad_c, iy, a, ia, b, ib);
+    let normalized_ia = compute_normalized_binary_indices(ia, ib, iy);
+    let normalized_ib = compute_normalized_binary_indices(ib, ia, iy);
 
-    // Find contracted indices (in both ia and ib, but not in iy)
-    let contracted: Vec<usize> = ia
-        .iter()
-        .filter(|&i| ib.contains(i) && !iy.contains(i))
-        .copied()
-        .collect();
+    let normalized_a = if normalized_ia == ia {
+        a.clone()
+    } else {
+        execute_unary_naive::<A, T, B>(a, ia, &normalized_ia, &size_dict)
+    };
+    let normalized_b = if normalized_ib == ib {
+        b.clone()
+    } else {
+        execute_unary_naive::<A, T, B>(b, ib, &normalized_ib, &size_dict)
+    };
 
-    // For grad_a: contract grad_c with b to get shape of a
-    // grad_c has indices iy, b has indices ib
-    // We want result with indices ia
-    // The contraction should be over indices that are in both iy and ib (right indices)
-    let grad_a = grad_c.contract_binary::<A>(b, iy, ib, ia);
+    let grad_a_normalized =
+        grad_c.contract_binary::<A>(&normalized_b, iy, &normalized_ib, &normalized_ia);
+    let grad_b_normalized =
+        normalized_a.contract_binary::<A>(grad_c, &normalized_ia, iy, &normalized_ib);
 
-    // For grad_b: contract a with grad_c to get shape of b
-    // a has indices ia, grad_c has indices iy
-    // We want result with indices ib
-    // The contraction should be over indices that are in both ia and iy (left indices)
-    let grad_b = a.contract_binary::<A>(grad_c, ia, iy, ib);
-
-    let _ = contracted; // Mark as used (for documentation clarity)
+    let grad_a = if normalized_ia == ia {
+        grad_a_normalized
+    } else {
+        contract_unary_backward::<A, T, B>(&grad_a_normalized, ia, &normalized_ia, &size_dict)
+    };
+    let grad_b = if normalized_ib == ib {
+        grad_b_normalized
+    } else {
+        contract_unary_backward::<A, T, B>(&grad_b_normalized, ib, &normalized_ib, &size_dict)
+    };
 
     (grad_a, grad_b)
 }
@@ -207,75 +350,47 @@ where
     T: Scalar,
     B: Backend,
 {
-    // For tropical backward, we need to use the argmax to route gradients.
-    // The argmax tells us which k index "won" for each output element.
-    //
-    // For a simple matmul C[i,j] = max_k (A[i,k] + B[k,j]):
-    // - grad_A[i, argmax[i,j]] += grad_C[i,j] for each (i,j)
-    // - grad_B[argmax[i,j], j] += grad_C[i,j] for each (i,j)
+    let size_dict = infer_binary_size_dict(grad_c, iy, a, ia, b, ib);
+    let normalized_ia = compute_normalized_binary_indices(ia, ib, iy);
+    let normalized_ib = compute_normalized_binary_indices(ib, ia, iy);
 
-    // Get the shapes we need
-    let a_shape = a.shape();
-    let b_shape = b.shape();
-
-    // For the simple 2D matmul case: C[i,j] = max_k (A[i,k] + B[k,j])
-    // We need to scatter gradients using the argmax.
-    //
-    // Generic implementation using tensor indexing
-    // (CPU backend has optimized internal methods, but this works for any backend)
-
-    if a.ndim() == 2 && b.ndim() == 2 && grad_c.ndim() == 2 {
-        // Matmul case: C[m,n] = A[m,k] * B[k,n]
-        let m = a_shape[0];
-        let k = a_shape[1];
-        let n = b_shape[1];
-
-        // Make tensors contiguous for indexing
-        let grad_c_contig = grad_c.contiguous();
-        let argmax_contig = argmax.contiguous();
-
-        // Get data as vectors for generic implementation
-        let grad_c_vec = grad_c_contig.to_vec();
-        let argmax_vec = argmax_contig.to_vec();
-
-        // Initialize gradient storage
-        let mut grad_a_vec = vec![T::default(); m * k];
-        let mut grad_b_vec = vec![T::default(); k * n];
-
-        // Route gradients through argmax (column-major indexing)
-        // Column-major: element (i, j) is at index j * nrows + i
-        for j in 0..n {
-            for i in 0..m {
-                let idx = j * m + i;
-                let winner_k = argmax_vec[idx] as usize;
-                let gc = grad_c_vec[idx];
-
-                // grad_a[i, winner_k] += grad_c[i, j]
-                grad_a_vec[winner_k * m + i] += gc;
-
-                // grad_b[winner_k, j] += grad_c[i, j]
-                grad_b_vec[j * k + winner_k] += gc;
-            }
-        }
-
-        let grad_a = Tensor::from_storage(
-            B::Storage::from_slice(&grad_a_vec),
-            a_shape,
-            a.backend().clone(),
-        );
-        let grad_b = Tensor::from_storage(
-            B::Storage::from_slice(&grad_b_vec),
-            b_shape,
-            b.backend().clone(),
-        );
-
-        (grad_a, grad_b)
+    let (normalized_a, a_unary_argmax) = if normalized_ia == ia {
+        (a.clone(), None)
     } else {
-        // For higher-dimensional cases, we would need more complex logic
-        // For now, this handles the common matmul case
-        let _ = (ia, ib, iy); // Mark as used
-        unimplemented!("Tropical backward only implemented for 2D matmul currently");
-    }
+        let (content, unary_argmax) =
+            execute_unary_with_argmax::<A, T, B>(a, ia, &normalized_ia, &size_dict);
+        (content, Some(unary_argmax))
+    };
+    let (normalized_b, b_unary_argmax) = if normalized_ib == ib {
+        (b.clone(), None)
+    } else {
+        let (content, unary_argmax) =
+            execute_unary_with_argmax::<A, T, B>(b, ib, &normalized_ib, &size_dict);
+        (content, Some(unary_argmax))
+    };
+
+    let (grad_a_normalized, grad_b_normalized) = tropical_backward_normalized(
+        grad_c,
+        &normalized_a,
+        &normalized_b,
+        argmax,
+        &normalized_ia,
+        &normalized_ib,
+        iy,
+    );
+
+    let grad_a = if let Some(unary_argmax) = a_unary_argmax {
+        tropical_unary_backward::<T, B>(&grad_a_normalized, &unary_argmax, a.shape())
+    } else {
+        grad_a_normalized
+    };
+    let grad_b = if let Some(unary_argmax) = b_unary_argmax {
+        tropical_unary_backward::<T, B>(&grad_b_normalized, &unary_argmax, b.shape())
+    } else {
+        grad_b_normalized
+    };
+
+    (grad_a, grad_b)
 }
 
 // ============================================================================
@@ -761,6 +876,28 @@ mod tests {
         assert_eq!(grad_b.to_vec(), vec![1.0, 3.0, 2.0, 4.0]);
     }
 
+    #[test]
+    fn test_standard_backward_scalar_output_with_unreduced_free_modes() {
+        let a = Tensor::<f32, Cpu>::from_data(&[1.0, 2.0, 3.0, 4.0], &[2, 2]);
+        let b = Tensor::<f32, Cpu>::from_data(&[1.0, 2.0, 3.0, 4.0], &[2, 2]);
+        let grad_c = Tensor::<f32, Cpu>::from_data(&[1.0], &[]);
+
+        let (grad_a, grad_b) = contract_binary_backward::<Standard<f32>, _, _>(
+            &grad_c,
+            &a,
+            &b,
+            None,
+            &[0, 1],
+            &[1, 2],
+            &[],
+        );
+
+        assert_eq!(grad_a.shape(), &[2, 2]);
+        assert_eq!(grad_a.to_vec(), vec![4.0, 4.0, 6.0, 6.0]);
+        assert_eq!(grad_b.shape(), &[2, 2]);
+        assert_eq!(grad_b.to_vec(), vec![3.0, 7.0, 3.0, 7.0]);
+    }
+
     #[cfg(feature = "tropical")]
     #[test]
     fn test_tropical_backward_matmul() {
@@ -814,6 +951,34 @@ mod tests {
         // grad_B = [[0, 0], [2, 2]] in column-major: [0, 2, 0, 2]
         assert_eq!(grad_b.shape(), &[2, 2]);
         assert_eq!(grad_b.to_vec(), vec![0.0, 2.0, 0.0, 2.0]);
+    }
+
+    #[cfg(feature = "tropical")]
+    #[test]
+    fn test_tropical_backward_vector_dot_to_scalar() {
+        let a = Tensor::<f32, Cpu>::from_data(&[1.0, 3.0], &[2]);
+        let b = Tensor::<f32, Cpu>::from_data(&[10.0, 20.0], &[2]);
+
+        let (c, argmax) = a.contract_binary_with_argmax::<MaxPlus<f32>>(&b, &[0], &[0], &[]);
+        assert_eq!(c.shape(), &[] as &[usize]);
+        assert_eq!(c.to_vec(), vec![23.0]);
+        assert_eq!(argmax.to_vec(), vec![1]);
+
+        let grad_c = Tensor::<f32, Cpu>::from_data(&[1.0], &[]);
+        let (grad_a, grad_b) = contract_binary_backward::<MaxPlus<f32>, _, _>(
+            &grad_c,
+            &a,
+            &b,
+            Some(&argmax),
+            &[0],
+            &[0],
+            &[],
+        );
+
+        assert_eq!(grad_a.shape(), &[2]);
+        assert_eq!(grad_a.to_vec(), vec![0.0, 1.0]);
+        assert_eq!(grad_b.shape(), &[2]);
+        assert_eq!(grad_b.to_vec(), vec![0.0, 1.0]);
     }
 
     // Test only with tropical feature, not tropical-kernels, because the optimized
@@ -1437,9 +1602,7 @@ mod tests {
 
     use crate::Einsum;
 
-    /// Requires omeco fix: https://github.com/GiggleLiu/omeco/issues/13
     #[test]
-    #[ignore = "Requires omeco fix: https://github.com/GiggleLiu/omeco/issues/13"]
     fn test_cost_and_gradient_matmul_to_scalar() {
         // A[i,j] @ B[j,k] -> scalar (full contraction)
         // A[2,2], B[2,2] -> scalar by summing over all indices
@@ -1657,10 +1820,8 @@ mod tests {
         ));
     }
 
-    /// Requires omeco fix: https://github.com/GiggleLiu/omeco/issues/13
     #[cfg(feature = "tropical")]
     #[test]
-    #[ignore = "Requires omeco fix: https://github.com/GiggleLiu/omeco/issues/13"]
     fn test_cost_and_gradient_tropical_matmul() {
         // MaxPlus matmul: C[i,k] = max_j (A[i,j] + B[j,k])
         let a = Tensor::<f64, Cpu>::from_data(&[1.0, 2.0, 3.0, 4.0], &[2, 2]);
@@ -1727,9 +1888,7 @@ mod tests {
     }
 
     /// Julia test: contract to 0-dim array (ij, ij) -> scalar
-    /// Requires omeco fix: https://github.com/GiggleLiu/omeco/issues/13
     #[test]
-    #[ignore = "Requires omeco fix: https://github.com/GiggleLiu/omeco/issues/13"]
     fn test_julia_bp_contract_to_scalar() {
         let a = Tensor::<f64, Cpu>::from_data(&[1.0, 2.0, 3.0, 4.0], &[2, 2]);
         let b = Tensor::<f64, Cpu>::from_data(&[5.0, 6.0, 7.0, 8.0], &[2, 2]);
@@ -1939,10 +2098,7 @@ mod tests {
     // ========================================================================
 
     /// Test that omeco's optimize_code respects the final output indices.
-    /// Currently fails because omeco returns a tree with iy=[0,2] instead of iy=[].
-    /// Tracked in: https://github.com/GiggleLiu/omeco/issues/13
     #[test]
-    #[ignore = "Waiting for omeco fix: https://github.com/GiggleLiu/omeco/issues/13"]
     fn test_omeco_respects_final_iy() {
         use omeco::{optimize_code, EinCode, GreedyMethod, NestedEinsum};
 
@@ -1954,7 +2110,6 @@ mod tests {
         if let Some(tree) = optimize_code(&code, &sizes, &optimizer) {
             match &tree {
                 NestedEinsum::Node { eins, .. } => {
-                    // This currently fails: eins.iy is [0, 2], not []
                     assert_eq!(
                         eins.iy, code.iy,
                         "omeco should respect the final output indices. \

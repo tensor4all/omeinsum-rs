@@ -110,8 +110,7 @@ pub fn run(
         }
     };
 
-    let tree =
-        tree.ok_or_else(|| "Optimization produced no contraction tree".to_string())?;
+    let tree = tree.ok_or_else(|| "Optimization produced no contraction tree".to_string())?;
 
     let label_map = parsed
         .label_map
