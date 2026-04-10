@@ -68,3 +68,6 @@ required-features = ["tropical"]
 name = "tropical_network"
 path = "examples/tropical_network.rs"
 required-features = ["tropical"]
+
+[workspace]
+members = [".", "omeinsum-cli"]
