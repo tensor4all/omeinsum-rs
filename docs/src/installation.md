@@ -15,7 +15,7 @@ For the latest development version:
 
 ```toml
 [dependencies]
-omeinsum = { git = "https://github.com/TensorBFS/omeinsum-rs" }
+omeinsum = { git = "https://github.com/tensor4all/omeinsum-rs" }
 ```
 
 ## Features

@@ -1,8 +1,6 @@
 //! Tests for tropical algebra operations.
 //! Run with: cargo test --test tropical --features tropical
 
-#![cfg(feature = "tropical")]
-
 use omeinsum::backend::Cpu;
 use omeinsum::{einsum, MaxMul, MaxPlus, MinPlus, Tensor};
 

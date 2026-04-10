@@ -1,8 +1,8 @@
 # omeinsum-rs
 
-[![CI](https://github.com/TensorBFS/omeinsum-rs/actions/workflows/ci.yml/badge.svg)](https://github.com/TensorBFS/omeinsum-rs/actions/workflows/ci.yml)
-[![Coverage](https://img.shields.io/codecov/c/github/TensorBFS/omeinsum-rs)](https://codecov.io/gh/TensorBFS/omeinsum-rs)
-[![Docs](https://img.shields.io/badge/docs-latest-blue.svg)](https://tensorbfs.github.io/omeinsum-rs/)
+[![CI](https://github.com/tensor4all/omeinsum-rs/actions/workflows/ci.yml/badge.svg)](https://github.com/tensor4all/omeinsum-rs/actions/workflows/ci.yml)
+[![Coverage](https://img.shields.io/codecov/c/github/tensor4all/omeinsum-rs)](https://codecov.io/gh/tensor4all/omeinsum-rs)
+[![Docs](https://img.shields.io/badge/docs-latest-blue.svg)](https://tensor4all.github.io/omeinsum-rs/)
 
 Einstein summation for tropical and standard tensor networks in Rust. Inspired by [OMEinsum.jl](https://github.com/under-Peter/OMEinsum.jl).
 
@@ -41,9 +41,20 @@ assert_eq!(c.to_vec(), vec![5.0, 6.0, 7.0, 8.0]);
 
 ## Documentation
 
-📖 **[User Guide](https://tensorbfs.github.io/omeinsum-rs/)** - Installation, tutorials, examples
+📖 **[User Guide](https://tensor4all.github.io/omeinsum-rs/)** - Installation, tutorials, examples
 
-📚 **[API Reference](https://tensorbfs.github.io/omeinsum-rs/api/omeinsum/)** - Rust API documentation
+📚 **[API Reference](https://tensor4all.github.io/omeinsum-rs/api/omeinsum/)** - Rust API documentation
+
+## Development
+
+```bash
+make cargo-check
+make check
+cargo test --test main
+cargo test --features tropical
+```
+
+`make check` is the canonical non-GPU verification gate. Integration suites live in `tests/suites/` and are wired through `tests/main.rs`.
 
 ## Algebras
 

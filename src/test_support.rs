@@ -1,9 +1,7 @@
-#![cfg(test)]
-
 use crate::algebra::{Algebra, Scalar};
 use crate::backend::{Backend, BackendScalar};
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct TestBackend {
     pub(crate) id: usize,
 }
@@ -11,12 +9,6 @@ pub(crate) struct TestBackend {
 impl TestBackend {
     pub(crate) fn new(id: usize) -> Self {
         Self { id }
-    }
-}
-
-impl Default for TestBackend {
-    fn default() -> Self {
-        Self { id: 0 }
     }
 }
 

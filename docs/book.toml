@@ -1,7 +1,7 @@
 [book]
 title = "omeinsum-rs"
 description = "Einstein summation for tropical and standard tensor networks in Rust"
-authors = ["TensorBFS"]
+authors = ["tensor4all"]
 language = "en"
 
 [build]
@@ -10,8 +10,8 @@ build-dir = "book"
 [output.html]
 default-theme = "rust"
 preferred-dark-theme = "coal"
-git-repository-url = "https://github.com/TensorBFS/omeinsum-rs"
-edit-url-template = "https://github.com/TensorBFS/omeinsum-rs/edit/main/docs/{path}"
+git-repository-url = "https://github.com/tensor4all/omeinsum-rs"
+edit-url-template = "https://github.com/tensor4all/omeinsum-rs/edit/main/docs/{path}"
 
 [output.html.search]
 enable = true

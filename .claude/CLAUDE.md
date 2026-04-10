@@ -1,71 +1,47 @@
-# omeinsum-rs
+# CLAUDE.md
 
-Rust implementation of OMEinsum.jl - Einstein summation for tropical and standard tensor networks.
+## Project Overview
 
-## Project Structure
+Rust library for Einstein summation over standard and tropical algebras, with contraction-order optimization and backward support.
 
-```
-src/
-├── lib.rs              # Public API exports
-├── algebra/            # Algebra types (Standard, MaxPlus, MinPlus, MaxMul)
-│   ├── mod.rs
-│   ├── semiring.rs     # Semiring and Algebra traits
-│   ├── standard.rs     # Standard (+, ×) algebra
-│   └── tropical.rs     # Tropical algebras (feature-gated)
-├── backend/            # Hardware backends
-│   ├── mod.rs
-│   ├── traits.rs       # Backend and Storage traits
-│   ├── cpu/            # CPU backend (always enabled)
-│   └── cuda/           # CUDA backend (optional feature)
-├── tensor/             # Tensor type with stride-based views
-│   ├── mod.rs
-│   ├── ops.rs          # contract_binary methods
-│   └── view.rs         # TensorView
-└── einsum/             # Einsum engine
-    ├── mod.rs          # einsum, einsum_with_grad, cost_and_gradient
-    ├── engine.rs       # Einsum struct, optimization, execution
-    ├── backward.rs     # Gradient computation, CacheTree
-    └── builder.rs      # EinBuilder fluent API
-```
+## Philosophy
 
-## Key Conventions
+- **Correctness before convenience.** Preserve exact einsum semantics, especially around repeated labels, scalar shapes, and tropical argmax routing.
+- **Simple logic, maximum reuse.** Prefer shared normalization and execution paths over public ad hoc special cases.
+- **Root-cause fixes over patches.** If a bug comes from lowering, topology, or backend ownership, fix it at the source.
+- **Topology and tensor data are separate concerns.** Keep contraction structure independent from concrete tensor storage and backend instances.
+- **Tests should prove values, not just shapes.** Shape-only assertions are rarely enough for contraction code.
 
-### Column-Major Layout
-All tensors use column-major (Fortran) ordering. Element `[i,j,k]` in shape `[m,n,p]` is at position `i + j*m + k*m*n`.
-
-### Index Labels
-Einsum indices are `usize` integers, not characters. Example: `A[0,1] @ B[1,2] -> C[0,2]` for matmul.
-
-### Algebra System
-- `Semiring` trait: zero, one, add (⊕), mul (⊗)
-- `Algebra` trait: extends Semiring with gradient support (`needs_argmax`, `add_backward`, `mul_backward`)
-
-### Gradient Computation
-- Standard algebra: index-exchange trick (swap input/output indices)
-- Tropical algebras: argmax routing (gradient flows through winner only)
-
-## Testing
+## Commands
 
 ```bash
-# Run all tests (requires tropical feature for full coverage)
+make help
+make cargo-check
+make check
+make test
+cargo test --test main
 cargo test --features tropical
-
-# Run with coverage
-cargo llvm-cov --features tropical
 ```
 
-Test coverage target: >95%
+`make check` is the canonical pre-PR gate. It runs formatting, clippy, and the non-GPU test suite.
 
-## Features
+## Testing Conventions
 
-- `tropical`: Enable MaxPlus, MinPlus, MaxMul algebras with optimized SIMD kernels
-- `cuda`: CUDA backend (requires cuTENSOR 2.0+)
-- `parallel`: Parallel execution via rayon
+- Unit tests belong next to the code in `src/` under `#[cfg(test)]`.
+- Integration tests are consolidated through `tests/main.rs`, with suites in `tests/suites/`.
+- Do not add new top-level `tests/*.rs` integration crates unless there is a strong reason. Prefer wiring new suites into `tests/main.rs`.
+- CUDA tests remain feature-gated and are not part of the default non-GPU verification path.
+- For contraction and backward changes, prefer regressions that check concrete values, gradients, and backend/device preservation.
 
-## Reference
+## Review Conventions
 
-Julia implementation: [OMEinsum.jl](https://github.com/under-Peter/OMEinsum.jl)
+- Review for correctness first, then DRY/KISS/HC-LC.
+- Look for backend preservation bugs, repeated-label lowering mistakes, scalar shape mismatches, and tropical winner-routing issues.
+- When fixing bugs, add the regression before or alongside the implementation.
 
-Key files for reference:
-- `~/.julia/dev/OMEinsum/src/bp.jl` - cost_and_gradient, CacheTree, back_propagate
-- `~/.julia/dev/OMEinsum/src/einsum.jl` - einsum_grad (backward rule)
+## Repo-Local Skills
+
+Repo-local skills live under `.claude/skills/*/SKILL.md`.
+
+- `review-quality` - read-only review checklist for DRY, KISS, correctness, and test quality
+- `fix-pr` - workflow for addressing PR comments, CI failures, and missing coverage

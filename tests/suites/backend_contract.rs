@@ -94,7 +94,7 @@ fn test_cpu_contract_batched() {
 fn test_cpu_contract_tropical() {
     use omeinsum::MaxPlus;
 
-    let cpu = Cpu::default();
+    let cpu = Cpu;
 
     let a = vec![1.0f64, 2.0, 3.0, 4.0];
     let b = vec![1.0, 2.0, 3.0, 4.0];
@@ -268,7 +268,7 @@ fn test_cpu_contract_batched_output_permuted() {
 fn test_cpu_contract_with_argmax() {
     use omeinsum::MaxPlus;
 
-    let cpu = Cpu::default();
+    let cpu = Cpu;
 
     let a = vec![1.0f64, 2.0, 3.0, 4.0]; // 2x2
     let b = vec![1.0, 2.0, 3.0, 4.0]; // 2x2
@@ -297,7 +297,7 @@ fn test_cpu_contract_with_argmax() {
 fn test_cpu_contract_with_argmax_strided() {
     use omeinsum::MaxPlus;
 
-    let cpu = Cpu::default();
+    let cpu = Cpu;
 
     // 3x3 matrix, use 2x2 submatrix via strides
     let a = vec![1.0f64, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0];
@@ -325,7 +325,7 @@ fn test_cpu_contract_with_argmax_strided() {
 fn test_cpu_contract_with_argmax_output_permuted() {
     use omeinsum::MaxPlus;
 
-    let cpu = Cpu::default();
+    let cpu = Cpu;
 
     let a = vec![1.0f64, 2.0, 3.0, 4.0];
     let b = vec![1.0, 2.0, 3.0, 4.0];
@@ -355,7 +355,7 @@ fn test_cpu_contract_with_argmax_output_permuted() {
 fn test_cpu_contract_with_argmax_batched() {
     use omeinsum::MaxPlus;
 
-    let cpu = Cpu::default();
+    let cpu = Cpu;
 
     // Batched tropical contraction
     let a = vec![1.0f64, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0]; // 2x2x2

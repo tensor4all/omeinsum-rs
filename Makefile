@@ -1,10 +1,12 @@
 # Makefile for omeinsum-rs
 # Automates environment setup, testing, documentation, and examples
 
-.PHONY: all build check test test-gpu bench docs clean help
+NON_GPU_FEATURES := tropical parallel
+
+.PHONY: all build build-debug cargo-check check test test-gpu test-release bench docs clean help
 .PHONY: setup setup-rust
 .PHONY: docs-build docs-serve docs-book docs-book-serve
-.PHONY: fmt clippy lint coverage
+.PHONY: fmt fmt-check clippy lint coverage
 .PHONY: example-basic example-tropical
 
 # Default target
@@ -24,7 +26,8 @@ help:
 	@echo "Build targets:"
 	@echo "  build          - Build in release mode"
 	@echo "  build-debug    - Build in debug mode"
-	@echo "  check          - Check for errors"
+	@echo "  cargo-check    - Fast compile-only check for the non-GPU feature set"
+	@echo "  check          - Canonical pre-PR gate (fmt-check + clippy + test)"
 	@echo ""
 	@echo "Test targets:"
 	@echo "  test           - Run tests with non-GPU features (tropical, parallel)"
@@ -42,7 +45,7 @@ help:
 	@echo "  docs           - Build all documentation (API + user guide)"
 	@echo "  docs-build     - Build Rust API documentation"
 	@echo "  docs-book      - Build mdBook user guide"
-	@echo "  docs-book-serve- Serve mdBook locally (port 3000)"
+	@echo "  docs-book-serve - Serve mdBook locally (port 3000)"
 	@echo "  docs-serve     - Serve API docs locally (port 8000)"
 	@echo ""
 	@echo "Code quality targets:"
@@ -79,8 +82,8 @@ build:
 build-debug:
 	cargo build
 
-check:
-	cargo check
+cargo-check:
+	cargo check --features "$(NON_GPU_FEATURES)"
 
 #==============================================================================
 # Testing
@@ -88,7 +91,7 @@ check:
 
 test:
 	@echo "Running tests with non-GPU features (tropical, parallel)..."
-	cargo test --features "tropical parallel"
+	cargo test --features "$(NON_GPU_FEATURES)"
 	@echo "Tests complete."
 
 test-gpu:
@@ -161,9 +164,12 @@ fmt-check:
 	cargo fmt --all -- --check
 
 clippy:
-	cargo clippy --workspace -- -D warnings
+	cargo clippy --all-targets --features "$(NON_GPU_FEATURES)" -- -D warnings
 
 lint: fmt-check clippy
+
+check: fmt-check clippy test
+	@echo "All checks passed."
 
 coverage:
 	@echo "Generating test coverage..."

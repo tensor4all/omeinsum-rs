@@ -2,7 +2,7 @@
 
 Full API documentation is available at:
 
-**[https://tensorbfs.github.io/omeinsum-rs/api/omeinsum/](https://tensorbfs.github.io/omeinsum-rs/api/omeinsum/)**
+**[https://tensor4all.github.io/omeinsum-rs/api/omeinsum/](https://tensor4all.github.io/omeinsum-rs/api/omeinsum/)**
 
 ## Quick Reference
 
