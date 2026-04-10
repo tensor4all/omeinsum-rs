@@ -1,5 +1,7 @@
 use clap::{Parser, Subcommand};
 
+mod parse;
+
 #[derive(Parser)]
 #[command(name = "omeinsum", about = "Einstein summation CLI")]
 struct Cli {
