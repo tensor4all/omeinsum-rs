@@ -40,7 +40,7 @@ pub fn einsum<A, T, B>(tensors: &[&Tensor<T, B>], ixs: &[&[usize]], iy: &[usize]
 where
     A: Algebra<Scalar = T, Index = u32>,
     T: Scalar + BackendScalar<B>,
-    B: Backend + Default,
+    B: Backend,
 {
     let size_dict = infer_size_dict(tensors, ixs);
     let ixs_owned: Vec<Vec<usize>> = ixs.iter().map(|ix| ix.to_vec()).collect();
@@ -65,7 +65,7 @@ pub fn einsum_with_grad<A, T, B>(
 where
     A: Algebra<Scalar = T, Index = u32>,
     T: Scalar + BackendScalar<B>,
-    B: Backend + Default,
+    B: Backend,
 {
     let size_dict = infer_size_dict(tensors, ixs);
     let ixs_owned: Vec<Vec<usize>> = ixs.iter().map(|ix| ix.to_vec()).collect();
@@ -101,7 +101,7 @@ pub struct EinsumGradient<T: Scalar, B: Backend> {
     _phantom: std::marker::PhantomData<T>,
 }
 
-impl<T: Scalar + BackendScalar<B>, B: Backend + Default> EinsumGradient<T, B> {
+impl<T: Scalar + BackendScalar<B>, B: Backend> EinsumGradient<T, B> {
     /// Compute gradients for all inputs given the output gradient.
     ///
     /// # Arguments
@@ -217,4 +217,47 @@ fn infer_size_dict<T: Scalar, B: Backend>(
     }
 
     size_dict
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_support::TestBackend;
+    use crate::Standard;
+
+    #[test]
+    fn test_unary_einsum_preserves_explicit_backend() {
+        let backend = TestBackend::new(7);
+        let a = Tensor::<f32, TestBackend>::from_data_with_backend(
+            &[1.0, 2.0, 3.0, 4.0],
+            &[2, 2],
+            backend.clone(),
+        );
+
+        let result = einsum::<Standard<f32>, _, _>(&[&a], &[&[0, 0]], &[]);
+
+        assert_eq!(result.shape(), &[] as &[usize]);
+        assert_eq!(result.to_vec(), vec![5.0]);
+        assert_eq!(result.backend(), &backend);
+    }
+
+    #[test]
+    fn test_unary_backward_preserves_explicit_backend() {
+        let backend = TestBackend::new(11);
+        let a = Tensor::<f32, TestBackend>::from_data_with_backend(
+            &[1.0, 2.0, 3.0, 4.0],
+            &[2, 2],
+            backend.clone(),
+        );
+
+        let (result, grad_fn) = einsum_with_grad::<Standard<f32>, _, _>(&[&a], &[&[0, 0]], &[]);
+        let grad_out =
+            Tensor::<f32, TestBackend>::from_data_with_backend(&[1.0], &[], backend.clone());
+        let grads = grad_fn.backward::<Standard<f32>>(&grad_out, &[&a]);
+
+        assert_eq!(result.backend(), &backend);
+        assert_eq!(grads.len(), 1);
+        assert_eq!(grads[0].backend(), &backend);
+        assert_eq!(grads[0].to_vec(), vec![1.0, 0.0, 0.0, 1.0]);
+    }
 }

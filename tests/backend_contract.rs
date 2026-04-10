@@ -12,9 +12,16 @@ fn test_cpu_contract_matmul() {
     let b = vec![5.0, 6.0, 7.0, 8.0];
 
     let c = cpu.contract::<Standard<f64>>(
-        &a, &[2, 2], &[1, 2], &[0, 1],
-        &b, &[2, 2], &[1, 2], &[1, 2],
-        &[2, 2], &[0, 2],
+        &a,
+        &[2, 2],
+        &[1, 2],
+        &[0, 1],
+        &b,
+        &[2, 2],
+        &[1, 2],
+        &[1, 2],
+        &[2, 2],
+        &[0, 2],
     );
 
     // Column-major: [1,2,3,4] for shape [2,2] -> A = [[1,3],[2,4]] (rows)
@@ -33,11 +40,7 @@ fn test_cpu_contract_inner_product() {
     let a = vec![1.0f64, 2.0, 3.0];
     let b = vec![4.0, 5.0, 6.0];
 
-    let c = cpu.contract::<Standard<f64>>(
-        &a, &[3], &[1], &[0],
-        &b, &[3], &[1], &[0],
-        &[1], &[],
-    );
+    let c = cpu.contract::<Standard<f64>>(&a, &[3], &[1], &[0], &b, &[3], &[1], &[0], &[1], &[]);
 
     // 1*4 + 2*5 + 3*6 = 32
     assert_eq!(c, vec![32.0]);
@@ -51,11 +54,8 @@ fn test_cpu_contract_outer_product() {
     let a = vec![1.0f64, 2.0];
     let b = vec![3.0, 4.0, 5.0];
 
-    let c = cpu.contract::<Standard<f64>>(
-        &a, &[2], &[1], &[0],
-        &b, &[3], &[1], &[1],
-        &[2, 3], &[0, 1],
-    );
+    let c =
+        cpu.contract::<Standard<f64>>(&a, &[2], &[1], &[0], &b, &[3], &[1], &[1], &[2, 3], &[0, 1]);
 
     // [[1*3, 1*4, 1*5], [2*3, 2*4, 2*5]] = [[3,4,5], [6,8,10]]
     // Column-major: [3, 6, 4, 8, 5, 10]
@@ -72,9 +72,16 @@ fn test_cpu_contract_batched() {
     let b = vec![1.0, 0.0, 0.0, 1.0, 2.0, 0.0, 0.0, 2.0];
 
     let c = cpu.contract::<Standard<f64>>(
-        &a, &[2, 2, 2], &[1, 2, 4], &[0, 1, 2],
-        &b, &[2, 2, 2], &[1, 2, 4], &[0, 2, 3],
-        &[2, 2, 2], &[0, 1, 3],
+        &a,
+        &[2, 2, 2],
+        &[1, 2, 4],
+        &[0, 1, 2],
+        &b,
+        &[2, 2, 2],
+        &[1, 2, 4],
+        &[0, 2, 3],
+        &[2, 2, 2],
+        &[0, 1, 3],
     );
 
     // Batch 0: identity @ [[1,2],[3,4]] = [[1,2],[3,4]]
@@ -93,9 +100,16 @@ fn test_cpu_contract_tropical() {
     let b = vec![1.0, 2.0, 3.0, 4.0];
 
     let c = cpu.contract::<MaxPlus<f64>>(
-        &a, &[2, 2], &[1, 2], &[0, 1],
-        &b, &[2, 2], &[1, 2], &[1, 2],
-        &[2, 2], &[0, 2],
+        &a,
+        &[2, 2],
+        &[1, 2],
+        &[0, 1],
+        &b,
+        &[2, 2],
+        &[1, 2],
+        &[1, 2],
+        &[2, 2],
+        &[0, 2],
     );
 
     // Column-major: [1,2,3,4] -> A = [[1,3],[2,4]]
@@ -128,9 +142,16 @@ fn test_cpu_contract_strided_input() {
     let b = vec![1.0, 0.0, 0.0, 1.0]; // 2x2 identity
 
     let c = cpu.contract::<Standard<f64>>(
-        &a_full, &[2, 2], &[1, 3], &[0, 1],  // Strided access to a
-        &b, &[2, 2], &[1, 2], &[1, 2],
-        &[2, 2], &[0, 2],
+        &a_full,
+        &[2, 2],
+        &[1, 3],
+        &[0, 1], // Strided access to a
+        &b,
+        &[2, 2],
+        &[1, 2],
+        &[1, 2],
+        &[2, 2],
+        &[0, 2],
     );
 
     // Result should be the 2x2 submatrix times identity = the submatrix
@@ -145,16 +166,10 @@ fn test_cpu_contract_both_strided() {
 
     // 4x4 matrix, we'll use strided views of 2x2 submatrices
     let data_a = vec![
-        1.0f64, 2.0, 3.0, 4.0,
-        5.0, 6.0, 7.0, 8.0,
-        9.0, 10.0, 11.0, 12.0,
-        13.0, 14.0, 15.0, 16.0,
+        1.0f64, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0, 16.0,
     ];
     let data_b = vec![
-        9.0f64, 10.0, 11.0, 12.0,
-        13.0, 14.0, 15.0, 16.0,
-        1.0, 2.0, 3.0, 4.0,
-        5.0, 6.0, 7.0, 8.0,
+        9.0f64, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0, 16.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0,
     ];
 
     // Access the 2x2 submatrix starting at (0,0) with stride [1,4]
@@ -162,9 +177,16 @@ fn test_cpu_contract_both_strided() {
     // Access the 2x2 submatrix starting at (0,0) with stride [1,4]
     // [[9,13], [10,14]]
     let c = cpu.contract::<Standard<f64>>(
-        &data_a, &[2, 2], &[1, 4], &[0, 1],
-        &data_b, &[2, 2], &[1, 4], &[1, 2],
-        &[2, 2], &[0, 2],
+        &data_a,
+        &[2, 2],
+        &[1, 4],
+        &[0, 1],
+        &data_b,
+        &[2, 2],
+        &[1, 4],
+        &[1, 2],
+        &[2, 2],
+        &[0, 2],
     );
 
     // [[1,5], [2,6]] @ [[9,13], [10,14]]
@@ -186,13 +208,20 @@ fn test_cpu_contract_output_permuted() {
     let cpu = Cpu;
 
     let a = vec![1.0f64, 2.0, 3.0, 4.0]; // 2x2
-    let b = vec![5.0, 6.0, 7.0, 8.0];    // 2x2
+    let b = vec![5.0, 6.0, 7.0, 8.0]; // 2x2
 
     // Normal matmul gives C[i,k], but we want C[k,i] (transposed)
     let c = cpu.contract::<Standard<f64>>(
-        &a, &[2, 2], &[1, 2], &[0, 1],
-        &b, &[2, 2], &[1, 2], &[1, 2],
-        &[2, 2], &[2, 0],  // Output indices are [k, i] instead of [i, k]
+        &a,
+        &[2, 2],
+        &[1, 2],
+        &[0, 1],
+        &b,
+        &[2, 2],
+        &[1, 2],
+        &[1, 2],
+        &[2, 2],
+        &[2, 0], // Output indices are [k, i] instead of [i, k]
     );
 
     // Normal result would be [23, 34, 31, 46]
@@ -214,9 +243,16 @@ fn test_cpu_contract_batched_output_permuted() {
 
     // Result should be A with axes permuted to [k, i, b]
     let c = cpu.contract::<Standard<f64>>(
-        &a, &[2, 2, 2], &[1, 2, 4], &[0, 1, 2],  // b, i, j
-        &b, &[2, 2, 2], &[1, 2, 4], &[0, 2, 3],  // b, j, k
-        &[2, 2, 2], &[3, 1, 0],  // k, i, b
+        &a,
+        &[2, 2, 2],
+        &[1, 2, 4],
+        &[0, 1, 2], // b, i, j
+        &b,
+        &[2, 2, 2],
+        &[1, 2, 4],
+        &[0, 2, 3], // b, j, k
+        &[2, 2, 2],
+        &[3, 1, 0], // k, i, b
     );
 
     assert_eq!(c.len(), 8);
@@ -235,12 +271,19 @@ fn test_cpu_contract_with_argmax() {
     let cpu = Cpu::default();
 
     let a = vec![1.0f64, 2.0, 3.0, 4.0]; // 2x2
-    let b = vec![1.0, 2.0, 3.0, 4.0];    // 2x2
+    let b = vec![1.0, 2.0, 3.0, 4.0]; // 2x2
 
     let (c, argmax) = cpu.contract_with_argmax::<MaxPlus<f64>>(
-        &a, &[2, 2], &[1, 2], &[0, 1],
-        &b, &[2, 2], &[1, 2], &[1, 2],
-        &[2, 2], &[0, 2],
+        &a,
+        &[2, 2],
+        &[1, 2],
+        &[0, 1],
+        &b,
+        &[2, 2],
+        &[1, 2],
+        &[1, 2],
+        &[2, 2],
+        &[0, 2],
     );
 
     // Same as test_cpu_contract_tropical
@@ -261,9 +304,16 @@ fn test_cpu_contract_with_argmax_strided() {
     let b = vec![1.0, 0.0, 0.0, 1.0]; // 2x2 identity-ish for MaxPlus
 
     let (c, argmax) = cpu.contract_with_argmax::<MaxPlus<f64>>(
-        &a, &[2, 2], &[1, 3], &[0, 1],  // Strided
-        &b, &[2, 2], &[1, 2], &[1, 2],
-        &[2, 2], &[0, 2],
+        &a,
+        &[2, 2],
+        &[1, 3],
+        &[0, 1], // Strided
+        &b,
+        &[2, 2],
+        &[1, 2],
+        &[1, 2],
+        &[2, 2],
+        &[0, 2],
     );
 
     assert_eq!(c.len(), 4);
@@ -282,9 +332,16 @@ fn test_cpu_contract_with_argmax_output_permuted() {
 
     // Output permuted: ki instead of ik
     let (c, argmax) = cpu.contract_with_argmax::<MaxPlus<f64>>(
-        &a, &[2, 2], &[1, 2], &[0, 1],
-        &b, &[2, 2], &[1, 2], &[1, 2],
-        &[2, 2], &[2, 0],  // Permuted output
+        &a,
+        &[2, 2],
+        &[1, 2],
+        &[0, 1],
+        &b,
+        &[2, 2],
+        &[1, 2],
+        &[1, 2],
+        &[2, 2],
+        &[2, 0], // Permuted output
     );
 
     // Result should be transposed version of [5, 6, 7, 8]
@@ -302,12 +359,19 @@ fn test_cpu_contract_with_argmax_batched() {
 
     // Batched tropical contraction
     let a = vec![1.0f64, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0]; // 2x2x2
-    let b = vec![1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0];    // 2x2x2
+    let b = vec![1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0]; // 2x2x2
 
     let (c, argmax) = cpu.contract_with_argmax::<MaxPlus<f64>>(
-        &a, &[2, 2, 2], &[1, 2, 4], &[0, 1, 2],  // b, i, j
-        &b, &[2, 2, 2], &[1, 2, 4], &[0, 2, 3],  // b, j, k
-        &[2, 2, 2], &[0, 1, 3],  // b, i, k
+        &a,
+        &[2, 2, 2],
+        &[1, 2, 4],
+        &[0, 1, 2], // b, i, j
+        &b,
+        &[2, 2, 2],
+        &[1, 2, 4],
+        &[0, 2, 3], // b, j, k
+        &[2, 2, 2],
+        &[0, 1, 3], // b, i, k
     );
 
     assert_eq!(c.len(), 8);
@@ -326,9 +390,16 @@ fn test_cpu_contract_f32() {
     let b = vec![5.0f32, 6.0, 7.0, 8.0];
 
     let c = cpu.contract::<Standard<f32>>(
-        &a, &[2, 2], &[1, 2], &[0, 1],
-        &b, &[2, 2], &[1, 2], &[1, 2],
-        &[2, 2], &[0, 2],
+        &a,
+        &[2, 2],
+        &[1, 2],
+        &[0, 1],
+        &b,
+        &[2, 2],
+        &[1, 2],
+        &[1, 2],
+        &[2, 2],
+        &[0, 2],
     );
 
     assert_eq!(c, vec![23.0f32, 34.0, 31.0, 46.0]);

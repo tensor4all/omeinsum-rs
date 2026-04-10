@@ -93,11 +93,8 @@ impl<T: Scalar, B: Backend> Tensor<T, B> {
         let modes_c: Vec<i32> = iy.iter().map(|&i| i as i32).collect();
 
         // Compute output shape
-        let shape_c = compute_output_shape(
-            self.shape(), &modes_a,
-            other.shape(), &modes_b,
-            &modes_c,
-        );
+        let shape_c =
+            compute_output_shape(self.shape(), &modes_a, other.shape(), &modes_b, &modes_c);
 
         if track_argmax {
             let (c_storage, argmax_storage) = self.backend.contract_with_argmax::<A>(
@@ -114,11 +111,8 @@ impl<T: Scalar, B: Backend> Tensor<T, B> {
             );
 
             let c = Self::from_storage(c_storage, &shape_c, self.backend.clone());
-            let argmax = Tensor::<u32, B>::from_storage(
-                argmax_storage,
-                &shape_c,
-                self.backend.clone(),
-            );
+            let argmax =
+                Tensor::<u32, B>::from_storage(argmax_storage, &shape_c, self.backend.clone());
             (c, Some(argmax))
         } else {
             let c_storage = self.backend.contract::<A>(

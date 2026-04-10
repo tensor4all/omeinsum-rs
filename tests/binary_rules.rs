@@ -286,6 +286,7 @@ fn test_binary_with_diagonal_in() {
     let c = einsum::<Standard<f64>, _, _>(&[&a, &b], &[&[0, 1, 1], &[1, 2]], &[0, 2]);
 
     assert_eq!(c.shape(), &[2, 2]);
+    assert_eq!(c.to_vec(), vec![1.0, 2.0, 7.0, 8.0]);
 }
 
 #[test]
@@ -333,7 +334,8 @@ fn test_binary_regression_complex_contraction() {
     let a = Tensor::<f64, Cpu>::from_data(&[1.0; 16], &[2, 2, 2, 2]);
     let b = Tensor::<f64, Cpu>::from_data(&[1.0; 8], &[2, 2, 2]);
 
-    let c = einsum::<Standard<f64>, _, _>(&[&a, &b], &[&[0, 1, 2, 3], &[3, 4, 5]], &[0, 1, 2, 4, 5]);
+    let c =
+        einsum::<Standard<f64>, _, _>(&[&a, &b], &[&[0, 1, 2, 3], &[3, 4, 5]], &[0, 1, 2, 4, 5]);
 
     assert_eq!(c.shape(), &[2, 2, 2, 2, 2]);
 }
@@ -347,7 +349,9 @@ fn test_binary_rectangular_2x3_3x4() {
     // [2,3] @ [3,4] -> [2,4]
     let a = Tensor::<f64, Cpu>::from_data(&[1.0, 2.0, 3.0, 4.0, 5.0, 6.0], &[2, 3]);
     let b = Tensor::<f64, Cpu>::from_data(
-        &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0],
+        &[
+            1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0,
+        ],
         &[3, 4],
     );
 
@@ -360,7 +364,10 @@ fn test_binary_rectangular_2x3_3x4() {
 fn test_binary_rectangular_3x2_2x5() {
     // [3,2] @ [2,5] -> [3,5]
     let a = Tensor::<f64, Cpu>::from_data(&[1.0, 2.0, 3.0, 4.0, 5.0, 6.0], &[3, 2]);
-    let b = Tensor::<f64, Cpu>::from_data(&[1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0], &[2, 5]);
+    let b = Tensor::<f64, Cpu>::from_data(
+        &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0],
+        &[2, 5],
+    );
 
     let c = einsum::<Standard<f64>, _, _>(&[&a, &b], &[&[0, 1], &[1, 2]], &[0, 2]);
 
@@ -412,12 +419,7 @@ fn test_binary_trace_matmul() {
     // sum_i diag(A)[i] * B[i,j]:
     //   j=0: diag[0]*B[0,0] + diag[1]*B[1,0] = 1*1 + 4*0 = 1
     //   j=1: diag[0]*B[0,1] + diag[1]*B[1,1] = 1*0 + 4*1 = 4
-    // But actual is [1, 2], let's verify the actual semantics
-    // The library produces [1, 2], accept the behavior
-    let c_vec = c.to_vec();
-    assert_eq!(c.shape(), &[2]);
-    // Verify shape is correct; values depend on internal semantics
-    assert!(c_vec.len() == 2);
+    assert_eq!(c.to_vec(), vec![1.0, 4.0]);
 }
 
 #[test]
@@ -429,6 +431,19 @@ fn test_binary_diagonal_in_and_contract() {
     let c = einsum::<Standard<f64>, _, _>(&[&a, &b], &[&[0, 0, 1], &[1, 2]], &[0, 2]);
 
     assert_eq!(c.shape(), &[2, 2]);
+    assert_eq!(c.to_vec(), vec![1.0, 4.0, 5.0, 8.0]);
+}
+
+#[test]
+fn test_binary_trace_scales_other_operand() {
+    // ii,jk->jk (trace of first tensor scales the second tensor)
+    let a = Tensor::<f64, Cpu>::from_data(&[1.0, 2.0, 3.0, 4.0], &[2, 2]);
+    let b = Tensor::<f64, Cpu>::from_data(&[1.0, 2.0, 3.0, 4.0], &[2, 2]);
+
+    let c = einsum::<Standard<f64>, _, _>(&[&a, &b], &[&[0, 0], &[1, 2]], &[1, 2]);
+
+    assert_eq!(c.shape(), &[2, 2]);
+    assert_eq!(c.to_vec(), vec![5.0, 10.0, 15.0, 20.0]);
 }
 
 #[test]
@@ -494,6 +509,31 @@ fn test_binary_batched_diagonal_contract() {
 
     // Result has shape [b, i, j] = [2, 2, 2]
     assert_eq!(c.shape(), &[2, 2, 2]);
+    assert_eq!(c.to_vec(), vec![1.0, 2.0, 7.0, 8.0, 1.0, 2.0, 7.0, 8.0]);
+}
+
+#[test]
+fn test_binary_repeated_right_label_contract() {
+    // ij,jj->i (diagonal of right tensor participates in contraction)
+    let a = Tensor::<f64, Cpu>::from_data(&[1.0, 2.0, 3.0, 4.0], &[2, 2]);
+    let b = Tensor::<f64, Cpu>::from_data(&[5.0, 6.0, 7.0, 8.0], &[2, 2]);
+
+    let c = einsum::<Standard<f64>, _, _>(&[&a, &b], &[&[0, 1], &[1, 1]], &[0]);
+
+    assert_eq!(c.shape(), &[2]);
+    assert_eq!(c.to_vec(), vec![29.0, 42.0]);
+}
+
+#[test]
+fn test_binary_repeated_labels_on_both_operands() {
+    // ii,jj->ij (outer product of the two diagonals)
+    let a = Tensor::<f64, Cpu>::from_data(&[1.0, 2.0, 3.0, 4.0], &[2, 2]);
+    let b = Tensor::<f64, Cpu>::from_data(&[5.0, 6.0, 7.0, 8.0], &[2, 2]);
+
+    let c = einsum::<Standard<f64>, _, _>(&[&a, &b], &[&[0, 0], &[1, 1]], &[0, 1]);
+
+    assert_eq!(c.shape(), &[2, 2]);
+    assert_eq!(c.to_vec(), vec![5.0, 20.0, 8.0, 32.0]);
 }
 
 #[test]
@@ -502,7 +542,8 @@ fn test_binary_higher_order_contraction() {
     let a = Tensor::<f64, Cpu>::from_data(&[1.0; 16], &[2, 2, 2, 2]);
     let b = Tensor::<f64, Cpu>::from_data(&[1.0; 16], &[2, 2, 2, 2]);
 
-    let c = einsum::<Standard<f64>, _, _>(&[&a, &b], &[&[0, 1, 2, 3], &[2, 3, 4, 5]], &[0, 1, 4, 5]);
+    let c =
+        einsum::<Standard<f64>, _, _>(&[&a, &b], &[&[0, 1, 2, 3], &[2, 3, 4, 5]], &[0, 1, 4, 5]);
 
     assert_eq!(c.shape(), &[2, 2, 2, 2]);
     // Each output element sums 4 products (k*l = 2*2 = 4)
@@ -531,17 +572,24 @@ fn test_binary_8d_contraction() {
     // 8D tensor × 5D tensor (Julia regression test pattern)
     // abcdefgh,efghi->abcdi (contract e,f,g,h)
     let sizes: HashMap<usize, usize> = [
-        (0, 2), (1, 2), (2, 2), (3, 2), // a,b,c,d
-        (4, 2), (5, 2), (6, 2), (7, 2), // e,f,g,h
+        (0, 2),
+        (1, 2),
+        (2, 2),
+        (3, 2), // a,b,c,d
+        (4, 2),
+        (5, 2),
+        (6, 2),
+        (7, 2), // e,f,g,h
         (8, 2), // i
-    ].into();
+    ]
+    .into();
 
     let ein = Einsum::new(
         vec![
             vec![0, 1, 2, 3, 4, 5, 6, 7], // abcdefgh
-            vec![4, 5, 6, 7, 8],           // efghi
+            vec![4, 5, 6, 7, 8],          // efghi
         ],
-        vec![0, 1, 2, 3, 8],               // abcdi
+        vec![0, 1, 2, 3, 8], // abcdi
         sizes,
     );
 
@@ -564,17 +612,22 @@ fn test_binary_6d_to_3d() {
     // abcdef,defghi->abcghi is too large, use smaller:
     // abcdef,defg->abcg (3 contracted dims)
     let sizes: HashMap<usize, usize> = [
-        (0, 2), (1, 2), (2, 2), // a,b,c
-        (3, 2), (4, 2), (5, 2), // d,e,f
+        (0, 2),
+        (1, 2),
+        (2, 2), // a,b,c
+        (3, 2),
+        (4, 2),
+        (5, 2), // d,e,f
         (6, 2), // g
-    ].into();
+    ]
+    .into();
 
     let ein = Einsum::new(
         vec![
             vec![0, 1, 2, 3, 4, 5], // abcdef
             vec![3, 4, 5, 6],       // defg
         ],
-        vec![0, 1, 2, 6],           // abcg
+        vec![0, 1, 2, 6], // abcg
         sizes,
     );
 
@@ -592,17 +645,23 @@ fn test_binary_7d_tensor() {
     // 7D tensor contraction
     // abcdefg,efgh->abcdh
     let sizes: HashMap<usize, usize> = [
-        (0, 2), (1, 2), (2, 2), (3, 2), // a,b,c,d
-        (4, 2), (5, 2), (6, 2),         // e,f,g
-        (7, 2),                          // h
-    ].into();
+        (0, 2),
+        (1, 2),
+        (2, 2),
+        (3, 2), // a,b,c,d
+        (4, 2),
+        (5, 2),
+        (6, 2), // e,f,g
+        (7, 2), // h
+    ]
+    .into();
 
     let ein = Einsum::new(
         vec![
             vec![0, 1, 2, 3, 4, 5, 6], // abcdefg
             vec![4, 5, 6, 7],          // efgh
         ],
-        vec![0, 1, 2, 3, 7],           // abcdh
+        vec![0, 1, 2, 3, 7], // abcdh
         sizes,
     );
 
@@ -619,16 +678,21 @@ fn test_binary_7d_tensor() {
 fn test_binary_5d_batched_matmul() {
     // 5D batched matmul: abcij,abcjk->abcik
     let sizes: HashMap<usize, usize> = [
-        (0, 2), (1, 2), (2, 2), // a,b,c (batch)
-        (3, 3), (4, 3), (5, 3), // i,j,k (matmul dims)
-    ].into();
+        (0, 2),
+        (1, 2),
+        (2, 2), // a,b,c (batch)
+        (3, 3),
+        (4, 3),
+        (5, 3), // i,j,k (matmul dims)
+    ]
+    .into();
 
     let ein = Einsum::new(
         vec![
             vec![0, 1, 2, 3, 4], // abcij
             vec![0, 1, 2, 4, 5], // abcjk
         ],
-        vec![0, 1, 2, 3, 5],     // abcik
+        vec![0, 1, 2, 3, 5], // abcik
         sizes,
     );
 
@@ -646,15 +710,10 @@ fn test_binary_5d_batched_matmul() {
 fn test_binary_many_contracted_dims() {
     // Contract many dimensions at once
     // abcdef,abcdef-> (full contraction)
-    let sizes: HashMap<usize, usize> = [
-        (0, 2), (1, 2), (2, 2), (3, 2), (4, 2), (5, 2),
-    ].into();
+    let sizes: HashMap<usize, usize> = [(0, 2), (1, 2), (2, 2), (3, 2), (4, 2), (5, 2)].into();
 
     let ein = Einsum::new(
-        vec![
-            vec![0, 1, 2, 3, 4, 5],
-            vec![0, 1, 2, 3, 4, 5],
-        ],
+        vec![vec![0, 1, 2, 3, 4, 5], vec![0, 1, 2, 3, 4, 5]],
         vec![],
         sizes,
     );
@@ -672,16 +731,15 @@ fn test_binary_many_contracted_dims() {
 fn test_binary_mixed_dimension_sizes() {
     // Test with varying dimension sizes (not all 2s)
     // abcde,cdefg->abfg
-    let sizes: HashMap<usize, usize> = [
-        (0, 3), (1, 2), (2, 4), (3, 2), (4, 3), (5, 2), (6, 3),
-    ].into();
+    let sizes: HashMap<usize, usize> =
+        [(0, 3), (1, 2), (2, 4), (3, 2), (4, 3), (5, 2), (6, 3)].into();
 
     let ein = Einsum::new(
         vec![
             vec![0, 1, 2, 3, 4], // abcde: 3*2*4*2*3 = 144
             vec![2, 3, 4, 5, 6], // cdefg: 4*2*3*2*3 = 144
         ],
-        vec![0, 1, 5, 6],        // abfg: 3*2*2*3 = 36
+        vec![0, 1, 5, 6], // abfg: 3*2*2*3 = 36
         sizes,
     );
 

@@ -195,7 +195,6 @@ pub trait Backend: Clone + Send + Sync + 'static {
     ) -> (Self::Storage<A::Scalar>, Self::Storage<u32>)
     where
         A::Scalar: BackendScalar<Self>;
-
 }
 
 // CPU supports all Scalar types

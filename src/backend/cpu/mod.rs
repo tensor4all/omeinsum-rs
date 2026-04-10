@@ -268,9 +268,7 @@ impl Backend for Cpu {
         A::Scalar: BackendScalar<Self>,
     {
         contract::contract::<A>(
-            self, a, shape_a, strides_a, modes_a,
-            b, shape_b, strides_b, modes_b,
-            shape_c, modes_c,
+            self, a, shape_a, strides_a, modes_a, b, shape_b, strides_b, modes_b, shape_c, modes_c,
         )
     }
 
@@ -291,9 +289,7 @@ impl Backend for Cpu {
         A::Scalar: BackendScalar<Self>,
     {
         contract::contract_with_argmax::<A>(
-            self, a, shape_a, strides_a, modes_a,
-            b, shape_b, strides_b, modes_b,
-            shape_c, modes_c,
+            self, a, shape_a, strides_a, modes_a, b, shape_b, strides_b, modes_b, shape_c, modes_c,
         )
     }
 

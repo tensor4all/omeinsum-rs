@@ -64,6 +64,9 @@ pub mod backend;
 pub mod einsum;
 pub mod tensor;
 
+#[cfg(test)]
+pub(crate) mod test_support;
+
 // Re-exports
 pub use algebra::{Algebra, Complex32, Complex64, Semiring, Standard};
 pub use backend::{Backend, BackendScalar, Cpu, Storage};

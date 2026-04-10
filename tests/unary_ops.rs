@@ -32,10 +32,7 @@ fn test_unary_trace_2x2() {
 #[test]
 fn test_unary_trace_3x3() {
     // ii -> (trace of 3x3 matrix)
-    let a = Tensor::<f64, Cpu>::from_data(
-        &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0],
-        &[3, 3],
-    );
+    let a = Tensor::<f64, Cpu>::from_data(&[1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0], &[3, 3]);
     // Column-major: [[1,4,7],[2,5,8],[3,6,9]], diagonal = [1, 5, 9], trace = 15
 
     let sizes: HashMap<usize, usize> = [(0, 3)].into();
@@ -90,10 +87,7 @@ fn test_unary_diagonal_2x2() {
 #[test]
 fn test_unary_diagonal_3x3() {
     // ii -> i (extract diagonal of 3x3 matrix)
-    let a = Tensor::<f64, Cpu>::from_data(
-        &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0],
-        &[3, 3],
-    );
+    let a = Tensor::<f64, Cpu>::from_data(&[1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0], &[3, 3]);
     // Column-major: [[1,4,7],[2,5,8],[3,6,9]], diagonal = [1, 5, 9]
 
     let sizes: HashMap<usize, usize> = [(0, 3)].into();

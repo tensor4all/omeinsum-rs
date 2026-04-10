@@ -46,7 +46,10 @@ pub(super) fn classify_modes(
 
 /// Find the position of a mode in a modes array.
 pub(super) fn mode_position(modes: &[i32], mode: i32) -> usize {
-    modes.iter().position(|&m| m == mode).expect("mode not found")
+    modes
+        .iter()
+        .position(|&m| m == mode)
+        .expect("mode not found")
 }
 
 /// Compute the product of dimensions for given modes.
@@ -72,10 +75,7 @@ pub(super) fn compute_permutation(
         .copied()
         .collect();
 
-    target
-        .iter()
-        .map(|m| mode_position(current, *m))
-        .collect()
+    target.iter().map(|m| mode_position(current, *m)).collect()
 }
 
 use crate::algebra::Algebra;
@@ -125,17 +125,28 @@ where
 
     // 6. Call GEMM
     let c_data = if batch.is_empty() {
-        cpu.gemm_internal::<A>(&a_permuted, left_size, contract_size, &b_permuted, right_size)
+        cpu.gemm_internal::<A>(
+            &a_permuted,
+            left_size,
+            contract_size,
+            &b_permuted,
+            right_size,
+        )
     } else {
         cpu.gemm_batched_internal::<A>(
-            &a_permuted, batch_size, left_size, contract_size,
-            &b_permuted, right_size,
+            &a_permuted,
+            batch_size,
+            left_size,
+            contract_size,
+            &b_permuted,
+            right_size,
         )
     };
 
     // 7. Permute result to output order
     // Result is in [left, right, batch] order
-    let current_order: Vec<i32> = left.iter()
+    let current_order: Vec<i32> = left
+        .iter()
         .chain(right.iter())
         .chain(batch.iter())
         .copied()
@@ -157,11 +168,7 @@ where
 }
 
 /// Ensure data is contiguous (copy if strided).
-fn ensure_contiguous<T: Copy + Default>(
-    data: &[T],
-    shape: &[usize],
-    strides: &[usize],
-) -> Vec<T> {
+fn ensure_contiguous<T: Copy + Default>(data: &[T], shape: &[usize], strides: &[usize]) -> Vec<T> {
     let expected_strides = compute_contiguous_strides(shape);
     if strides == expected_strides {
         data.to_vec()
@@ -197,11 +204,7 @@ fn copy_strided_to_contiguous<T: Copy>(
 }
 
 /// Permute data according to axis permutation.
-fn permute_data<T: Copy + Default>(
-    data: &[T],
-    shape: &[usize],
-    perm: &[usize],
-) -> Vec<T> {
+fn permute_data<T: Copy + Default>(data: &[T], shape: &[usize], perm: &[usize]) -> Vec<T> {
     if perm.iter().enumerate().all(|(i, &p)| i == p) {
         return data.to_vec(); // Already in correct order
     }
@@ -269,18 +272,26 @@ where
     // Call GEMM with argmax
     let (c_data, argmax) = if batch.is_empty() {
         cpu.gemm_with_argmax_internal::<A>(
-            &a_permuted, left_size, contract_size,
-            &b_permuted, right_size,
+            &a_permuted,
+            left_size,
+            contract_size,
+            &b_permuted,
+            right_size,
         )
     } else {
         cpu.gemm_batched_with_argmax_internal::<A>(
-            &a_permuted, batch_size, left_size, contract_size,
-            &b_permuted, right_size,
+            &a_permuted,
+            batch_size,
+            left_size,
+            contract_size,
+            &b_permuted,
+            right_size,
         )
     };
 
     // Permute result - result is in [left, right, batch] order
-    let current_order: Vec<i32> = left.iter()
+    let current_order: Vec<i32> = left
+        .iter()
         .chain(right.iter())
         .chain(batch.iter())
         .copied()
@@ -311,8 +322,7 @@ mod tests {
     #[test]
     fn test_classify_modes_matmul() {
         // ij,jk->ik
-        let (batch, left, right, contracted) =
-            classify_modes(&[0, 1], &[1, 2], &[0, 2]);
+        let (batch, left, right, contracted) = classify_modes(&[0, 1], &[1, 2], &[0, 2]);
 
         assert!(batch.is_empty());
         assert_eq!(left, vec![0]);
@@ -323,8 +333,7 @@ mod tests {
     #[test]
     fn test_classify_modes_batched() {
         // bij,bjk->bik
-        let (batch, left, right, contracted) =
-            classify_modes(&[0, 1, 2], &[0, 2, 3], &[0, 1, 3]);
+        let (batch, left, right, contracted) = classify_modes(&[0, 1, 2], &[0, 2, 3], &[0, 1, 3]);
 
         assert_eq!(batch, vec![0]);
         assert_eq!(left, vec![1]);

@@ -229,12 +229,16 @@ fn test_mps_heisenberg_ground_state() {
         for i in 0..dim {
             // Sᶻᵢ Sᶻᵢ₊₁ (diagonal)
             let si = if (i >> bond) & 1 == 0 { 0.5 } else { -0.5 };
-            let sj = if (i >> (bond + 1)) & 1 == 0 { 0.5 } else { -0.5 };
+            let sj = if (i >> (bond + 1)) & 1 == 0 {
+                0.5
+            } else {
+                -0.5
+            };
             h_matrix[i][i] += si * sj;
 
             // S⁺ᵢ S⁻ᵢ₊₁ + S⁻ᵢ S⁺ᵢ₊₁ (off-diagonal spin exchange)
             // S⁺|↓⟩ = |↑⟩, S⁻|↑⟩ = |↓⟩  (with appropriate factors)
-            let si_up = (i >> bond) & 1;        // 0=↑, 1=↓
+            let si_up = (i >> bond) & 1; // 0=↑, 1=↓
             let sj_up = (i >> (bond + 1)) & 1;
 
             // S⁺ᵢ S⁻ᵢ₊₁: flips ↓→↑ at i and ↑→↓ at j
@@ -304,8 +308,11 @@ fn test_mps_heisenberg_ground_state() {
     println!("  Ground state energy E₀ = {:.6}", e_exact);
 
     // Verify this is close to known value (~-1.7467 for 5-site OBC)
-    assert!(e_exact < -1.5 && e_exact > -2.0,
-            "Ground state energy should be around -1.75, got {}", e_exact);
+    assert!(
+        e_exact < -1.5 && e_exact > -2.0,
+        "Ground state energy should be around -1.75, got {}",
+        e_exact
+    );
 
     // =========================================================================
     // Part 2: MPS Variational Optimization
@@ -330,7 +337,14 @@ fn test_mps_heisenberg_ground_state() {
     let mut a5 = init_mps(500, chi * 2);
 
     // Contract MPS to state vector
-    fn contract_mps(a1: &[f64], a2: &[f64], a3: &[f64], a4: &[f64], a5: &[f64], chi: usize) -> Vec<f64> {
+    fn contract_mps(
+        a1: &[f64],
+        a2: &[f64],
+        a3: &[f64],
+        a4: &[f64],
+        a5: &[f64],
+        chi: usize,
+    ) -> Vec<f64> {
         let mut psi = vec![0.0; 32];
         for s1 in 0..2 {
             for s2 in 0..2 {
@@ -361,8 +375,15 @@ fn test_mps_heisenberg_ground_state() {
     }
 
     // Compute energy
-    fn compute_energy(a1: &[f64], a2: &[f64], a3: &[f64], a4: &[f64], a5: &[f64],
-                      h: &[Vec<f64>], chi: usize) -> f64 {
+    fn compute_energy(
+        a1: &[f64],
+        a2: &[f64],
+        a3: &[f64],
+        a4: &[f64],
+        a5: &[f64],
+        h: &[Vec<f64>],
+        chi: usize,
+    ) -> f64 {
         let psi = contract_mps(a1, a2, a3, a4, a5, chi);
         let norm_sq: f64 = psi.iter().map(|x| x * x).sum();
         let mut e = 0.0;
@@ -376,8 +397,18 @@ fn test_mps_heisenberg_ground_state() {
 
     // Gradient via finite differences
     #[allow(clippy::too_many_arguments)]
-    fn grad_fd(a: &mut [f64], idx: usize, a1: &[f64], a2: &[f64], a3: &[f64],
-               a4: &[f64], a5: &[f64], h: &[Vec<f64>], chi: usize, eps: f64) -> Vec<f64> {
+    fn grad_fd(
+        a: &mut [f64],
+        idx: usize,
+        a1: &[f64],
+        a2: &[f64],
+        a3: &[f64],
+        a4: &[f64],
+        a5: &[f64],
+        h: &[Vec<f64>],
+        chi: usize,
+        eps: f64,
+    ) -> Vec<f64> {
         let n = a.len();
         let mut g = vec![0.0; n];
         for i in 0..n {
@@ -415,13 +446,74 @@ fn test_mps_heisenberg_ground_state() {
     println!("  Initial energy: {:.6}", e_init);
 
     for iter in 0..80 {
-        let g1 = grad_fd(&mut a1.clone(), 1, &a1, &a2, &a3, &a4, &a5, &h_matrix, chi, eps);
-        let g2 = grad_fd(&mut a2.clone(), 2, &a1, &a2, &a3, &a4, &a5, &h_matrix, chi, eps);
-        let g3 = grad_fd(&mut a3.clone(), 3, &a1, &a2, &a3, &a4, &a5, &h_matrix, chi, eps);
-        let g4 = grad_fd(&mut a4.clone(), 4, &a1, &a2, &a3, &a4, &a5, &h_matrix, chi, eps);
-        let g5 = grad_fd(&mut a5.clone(), 5, &a1, &a2, &a3, &a4, &a5, &h_matrix, chi, eps);
+        let g1 = grad_fd(
+            &mut a1.clone(),
+            1,
+            &a1,
+            &a2,
+            &a3,
+            &a4,
+            &a5,
+            &h_matrix,
+            chi,
+            eps,
+        );
+        let g2 = grad_fd(
+            &mut a2.clone(),
+            2,
+            &a1,
+            &a2,
+            &a3,
+            &a4,
+            &a5,
+            &h_matrix,
+            chi,
+            eps,
+        );
+        let g3 = grad_fd(
+            &mut a3.clone(),
+            3,
+            &a1,
+            &a2,
+            &a3,
+            &a4,
+            &a5,
+            &h_matrix,
+            chi,
+            eps,
+        );
+        let g4 = grad_fd(
+            &mut a4.clone(),
+            4,
+            &a1,
+            &a2,
+            &a3,
+            &a4,
+            &a5,
+            &h_matrix,
+            chi,
+            eps,
+        );
+        let g5 = grad_fd(
+            &mut a5.clone(),
+            5,
+            &a1,
+            &a2,
+            &a3,
+            &a4,
+            &a5,
+            &h_matrix,
+            chi,
+            eps,
+        );
 
-        for (a, g) in [(&mut a1, &g1), (&mut a2, &g2), (&mut a3, &g3), (&mut a4, &g4), (&mut a5, &g5)] {
+        for (a, g) in [
+            (&mut a1, &g1),
+            (&mut a2, &g2),
+            (&mut a3, &g3),
+            (&mut a4, &g4),
+            (&mut a5, &g5),
+        ] {
             for (ai, gi) in a.iter_mut().zip(g.iter()) {
                 *ai -= lr * gi;
             }
@@ -432,7 +524,9 @@ fn test_mps_heisenberg_ground_state() {
         let norm = psi.iter().map(|x| x * x).sum::<f64>().sqrt();
         let scale = norm.powf(0.2);
         for a in [&mut a1, &mut a2, &mut a3, &mut a4, &mut a5] {
-            for x in a.iter_mut() { *x /= scale; }
+            for x in a.iter_mut() {
+                *x /= scale;
+            }
         }
 
         if iter % 20 == 0 || iter == 79 {
@@ -452,7 +546,9 @@ fn test_mps_heisenberg_ground_state() {
     let t_a3 = Tensor::<f64, Cpu>::from_data(&a3, &[chi, 2, chi]);
 
     let (_result, grad_fn) = einsum_with_grad::<Standard<f64>, _, _>(
-        &[&t_a2, &t_a3], &[&[0, 1, 2], &[2, 3, 4]], &[0, 1, 3, 4],
+        &[&t_a2, &t_a3],
+        &[&[0, 1, 2], &[2, 3, 4]],
+        &[0, 1, 3, 4],
     );
 
     let grad_out = Tensor::<f64, Cpu>::from_data(&vec![1.0; chi * 2 * 2 * chi], &[chi, 2, 2, chi]);
@@ -460,13 +556,22 @@ fn test_mps_heisenberg_ground_state() {
 
     let mut max_diff = 0.0f64;
     for i in 0..a2.len() {
-        let mut a2p = a2.clone(); a2p[i] += eps;
-        let mut a2m = a2.clone(); a2m[i] -= eps;
+        let mut a2p = a2.clone();
+        a2p[i] += eps;
+        let mut a2m = a2.clone();
+        a2m[i] -= eps;
         let tp = Tensor::<f64, Cpu>::from_data(&a2p, &[chi, 2, chi]);
         let tm = Tensor::<f64, Cpu>::from_data(&a2m, &[chi, 2, chi]);
-        let rp = einsum::<Standard<f64>, _, _>(&[&tp, &t_a3], &[&[0, 1, 2], &[2, 3, 4]], &[0, 1, 3, 4]);
-        let rm = einsum::<Standard<f64>, _, _>(&[&tm, &t_a3], &[&[0, 1, 2], &[2, 3, 4]], &[0, 1, 3, 4]);
-        let fd: f64 = rp.to_vec().iter().zip(rm.to_vec().iter()).map(|(p, m)| (p - m) / (2.0 * eps)).sum();
+        let rp =
+            einsum::<Standard<f64>, _, _>(&[&tp, &t_a3], &[&[0, 1, 2], &[2, 3, 4]], &[0, 1, 3, 4]);
+        let rm =
+            einsum::<Standard<f64>, _, _>(&[&tm, &t_a3], &[&[0, 1, 2], &[2, 3, 4]], &[0, 1, 3, 4]);
+        let fd: f64 = rp
+            .to_vec()
+            .iter()
+            .zip(rm.to_vec().iter())
+            .map(|(p, m)| (p - m) / (2.0 * eps))
+            .sum();
         max_diff = max_diff.max((fd - grads[0].to_vec()[i]).abs());
     }
 
@@ -484,7 +589,11 @@ fn test_mps_heisenberg_ground_state() {
     println!("  Einsum autodiff verified:     ✓");
 
     assert!(e_final < e_init, "Optimization should decrease energy");
-    assert!(rel_err < 0.15, "MPS should be within 15% of exact (got {}%)", rel_err * 100.0);
+    assert!(
+        rel_err < 0.15,
+        "MPS should be within 15% of exact (got {}%)",
+        rel_err * 100.0
+    );
     println!("\n  ✓ MPS variational optimization successful\n");
 }
 
@@ -537,8 +646,10 @@ fn test_einsum_gradient_verification() {
             a_minus[i] -= eps;
             let a_minus_t = Tensor::<f64, Cpu>::from_data(&a_minus, &[2, 3]);
 
-            let r_plus = einsum::<Standard<f64>, _, _>(&[&a_plus_t, &b], &[&[0, 1], &[1, 2]], &[0, 2]);
-            let r_minus = einsum::<Standard<f64>, _, _>(&[&a_minus_t, &b], &[&[0, 1], &[1, 2]], &[0, 2]);
+            let r_plus =
+                einsum::<Standard<f64>, _, _>(&[&a_plus_t, &b], &[&[0, 1], &[1, 2]], &[0, 2]);
+            let r_minus =
+                einsum::<Standard<f64>, _, _>(&[&a_minus_t, &b], &[&[0, 1], &[1, 2]], &[0, 2]);
 
             // Finite diff gradient for element i
             let fd_grad: f64 = r_plus
@@ -554,7 +665,10 @@ fn test_einsum_gradient_verification() {
             max_diff_a = max_diff_a.max(diff);
         }
 
-        println!("  Gradient of A: max diff = {:.2e} (tol = {:.0e})", max_diff_a, tol);
+        println!(
+            "  Gradient of A: max diff = {:.2e} (tol = {:.0e})",
+            max_diff_a, tol
+        );
         assert!(max_diff_a < tol, "Gradient of A exceeds tolerance");
 
         // Verify gradient of B via finite differences
@@ -570,8 +684,10 @@ fn test_einsum_gradient_verification() {
             b_minus[i] -= eps;
             let b_minus_t = Tensor::<f64, Cpu>::from_data(&b_minus, &[3, 2]);
 
-            let r_plus = einsum::<Standard<f64>, _, _>(&[&a, &b_plus_t], &[&[0, 1], &[1, 2]], &[0, 2]);
-            let r_minus = einsum::<Standard<f64>, _, _>(&[&a, &b_minus_t], &[&[0, 1], &[1, 2]], &[0, 2]);
+            let r_plus =
+                einsum::<Standard<f64>, _, _>(&[&a, &b_plus_t], &[&[0, 1], &[1, 2]], &[0, 2]);
+            let r_minus =
+                einsum::<Standard<f64>, _, _>(&[&a, &b_minus_t], &[&[0, 1], &[1, 2]], &[0, 2]);
 
             let fd_grad: f64 = r_plus
                 .to_vec()
@@ -586,7 +702,10 @@ fn test_einsum_gradient_verification() {
             max_diff_b = max_diff_b.max(diff);
         }
 
-        println!("  Gradient of B: max diff = {:.2e} (tol = {:.0e})", max_diff_b, tol);
+        println!(
+            "  Gradient of B: max diff = {:.2e} (tol = {:.0e})",
+            max_diff_b, tol
+        );
         assert!(max_diff_b < tol, "Gradient of B exceeds tolerance");
         println!("  ✓ Matrix multiplication gradients verified");
     }
@@ -596,8 +715,7 @@ fn test_einsum_gradient_verification() {
     {
         let a = Tensor::<f64, Cpu>::from_data(&[1.0, 2.0, 3.0, 4.0], &[2, 2]);
 
-        let (result, grad_fn) =
-            einsum_with_grad::<Standard<f64>, _, _>(&[&a], &[&[0, 0]], &[]);
+        let (result, grad_fn) = einsum_with_grad::<Standard<f64>, _, _>(&[&a], &[&[0, 0]], &[]);
 
         assert_eq!(result.to_vec(), vec![5.0]); // trace = 1 + 4
 
@@ -642,8 +760,7 @@ fn test_einsum_gradient_verification() {
     {
         let a = Tensor::<f64, Cpu>::from_data(&[1.0, 2.0, 3.0, 4.0, 5.0, 6.0], &[2, 3]);
 
-        let (result, grad_fn) =
-            einsum_with_grad::<Standard<f64>, _, _>(&[&a], &[&[0, 1]], &[]);
+        let (result, grad_fn) = einsum_with_grad::<Standard<f64>, _, _>(&[&a], &[&[0, 1]], &[]);
 
         assert_eq!(result.to_vec(), vec![21.0]); // sum all = 21
 
@@ -665,16 +782,23 @@ fn test_einsum_gradient_verification() {
     {
         // Batch of 2, each 2x3 @ 3x2
         let a = Tensor::<f64, Cpu>::from_data(
-            &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0],
+            &[
+                1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0,
+            ],
             &[2, 2, 3],
         );
         let b = Tensor::<f64, Cpu>::from_data(
-            &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0],
+            &[
+                1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0,
+            ],
             &[2, 3, 2],
         );
 
-        let (_result, grad_fn) =
-            einsum_with_grad::<Standard<f64>, _, _>(&[&a, &b], &[&[0, 1, 2], &[0, 2, 3]], &[0, 1, 3]);
+        let (_result, grad_fn) = einsum_with_grad::<Standard<f64>, _, _>(
+            &[&a, &b],
+            &[&[0, 1, 2], &[0, 2, 3]],
+            &[0, 1, 3],
+        );
 
         let grad_output = Tensor::<f64, Cpu>::from_data(&[1.0; 8], &[2, 2, 2]);
         let grads = grad_fn.backward::<Standard<f64>>(&grad_output, &[&a, &b]);
@@ -690,14 +814,23 @@ fn test_einsum_gradient_verification() {
         assert!(grad_b_sum > 0.0, "Gradient B should be non-zero");
 
         // Verify via simple finite difference on total loss
-        let loss_orig: f64 = einsum::<Standard<f64>, _, _>(&[&a, &b], &[&[0, 1, 2], &[0, 2, 3]], &[0, 1, 3])
-            .to_vec().iter().sum();
+        let loss_orig: f64 =
+            einsum::<Standard<f64>, _, _>(&[&a, &b], &[&[0, 1, 2], &[0, 2, 3]], &[0, 1, 3])
+                .to_vec()
+                .iter()
+                .sum();
 
         // Perturb all elements of A slightly
         let a_perturbed_data: Vec<f64> = a.to_vec().iter().map(|x| x + eps).collect();
         let a_perturbed = Tensor::<f64, Cpu>::from_data(&a_perturbed_data, &[2, 2, 3]);
-        let loss_perturbed: f64 = einsum::<Standard<f64>, _, _>(&[&a_perturbed, &b], &[&[0, 1, 2], &[0, 2, 3]], &[0, 1, 3])
-            .to_vec().iter().sum();
+        let loss_perturbed: f64 = einsum::<Standard<f64>, _, _>(
+            &[&a_perturbed, &b],
+            &[&[0, 1, 2], &[0, 2, 3]],
+            &[0, 1, 3],
+        )
+        .to_vec()
+        .iter()
+        .sum();
 
         // The change in loss should approximately equal sum(grad_a) * eps
         let predicted_change = grad_a_sum * eps;
@@ -706,8 +839,10 @@ fn test_einsum_gradient_verification() {
 
         println!("  Gradient A shape: {:?} ✓", grads[0].shape());
         println!("  Gradient B shape: {:?} ✓", grads[1].shape());
-        println!("  Predicted Δloss: {:.6}, Actual Δloss: {:.6}, rel_error: {:.2e}",
-                 predicted_change, actual_change, rel_error);
+        println!(
+            "  Predicted Δloss: {:.6}, Actual Δloss: {:.6}, rel_error: {:.2e}",
+            predicted_change, actual_change, rel_error
+        );
         assert!(rel_error < 0.01, "Batched gradient direction incorrect");
         println!("  ✓ Batched contraction gradients verified");
     }

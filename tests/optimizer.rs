@@ -41,11 +41,7 @@ fn test_treesa_optimizer_basic() {
 fn test_optimizer_three_matrix_chain() {
     // ij,jk,kl->il
     let sizes: HashMap<usize, usize> = [(0, 3), (1, 3), (2, 3), (3, 3)].into();
-    let mut ein = Einsum::new(
-        vec![vec![0, 1], vec![1, 2], vec![2, 3]],
-        vec![0, 3],
-        sizes,
-    );
+    let mut ein = Einsum::new(vec![vec![0, 1], vec![1, 2], vec![2, 3]], vec![0, 3], sizes);
 
     ein.optimize_greedy();
     assert!(ein.is_optimized());
@@ -141,7 +137,10 @@ fn test_optimizer_two_independent_tensors() {
     // Outer product of [1,2,3] with [1,1,1]
     // In col-major: [[1,1,1],[2,2,2],[3,3,3]]^T stored as columns
     // = [1,2,3, 1,2,3, 1,2,3]
-    assert_eq!(result.to_vec(), vec![1.0, 2.0, 3.0, 1.0, 2.0, 3.0, 1.0, 2.0, 3.0]);
+    assert_eq!(
+        result.to_vec(),
+        vec![1.0, 2.0, 3.0, 1.0, 2.0, 3.0, 1.0, 2.0, 3.0]
+    );
 }
 
 // ============================================================================
@@ -278,7 +277,7 @@ fn test_optimizer_star_contraction() {
     let sizes: HashMap<usize, usize> = [(0, 2), (1, 2), (2, 2), (3, 2)].into();
     let mut ein = Einsum::new(
         vec![vec![0, 3], vec![1, 3], vec![2, 3]], // ai, bi, ci where i=3
-        vec![0, 1, 2],                             // abc
+        vec![0, 1, 2],                            // abc
         sizes,
     );
     ein.optimize_greedy();
@@ -296,11 +295,7 @@ fn test_optimizer_star_contraction() {
 fn test_optimizer_cycle_contraction() {
     // Cycle: ij,jk,ki-> (trace of product)
     let sizes: HashMap<usize, usize> = [(0, 2), (1, 2), (2, 2)].into();
-    let mut ein = Einsum::new(
-        vec![vec![0, 1], vec![1, 2], vec![2, 0]],
-        vec![],
-        sizes,
-    );
+    let mut ein = Einsum::new(vec![vec![0, 1], vec![1, 2], vec![2, 0]], vec![], sizes);
     ein.optimize_greedy();
     assert!(ein.is_optimized());
 
@@ -330,11 +325,7 @@ fn test_treesa_vs_greedy_same_result() {
     );
     ein_greedy.optimize_greedy();
 
-    let mut ein_treesa = Einsum::new(
-        vec![vec![0, 1], vec![1, 2], vec![2, 3]],
-        vec![0, 3],
-        sizes,
-    );
+    let mut ein_treesa = Einsum::new(vec![vec![0, 1], vec![1, 2], vec![2, 3]], vec![0, 3], sizes);
     ein_treesa.optimize_treesa();
 
     let a = Tensor::<f64, Cpu>::from_data(&[1.0, 2.0, 3.0, 4.0], &[2, 2]);
@@ -356,18 +347,16 @@ fn test_treesa_vs_greedy_same_result() {
 #[test]
 fn test_treesa_four_tensor_network() {
     // More complex network where TreeSA might find different path
-    let sizes: HashMap<usize, usize> = [
-        (0, 3), (1, 3), (2, 3), (3, 3), (4, 3),
-    ].into();
+    let sizes: HashMap<usize, usize> = [(0, 3), (1, 3), (2, 3), (3, 3), (4, 3)].into();
 
     let mut ein = Einsum::new(
         vec![
-            vec![0, 1],    // ab
-            vec![1, 2],    // bc
-            vec![2, 3],    // cd
-            vec![3, 4],    // de
+            vec![0, 1], // ab
+            vec![1, 2], // bc
+            vec![2, 3], // cd
+            vec![3, 4], // de
         ],
-        vec![0, 4],        // ae
+        vec![0, 4], // ae
         sizes,
     );
     ein.optimize_treesa();
@@ -391,9 +380,7 @@ fn test_treesa_four_tensor_network() {
 #[test]
 fn test_optimizer_4d_tensors() {
     // ijkl,klmn->ijmn (contract middle indices)
-    let sizes: HashMap<usize, usize> = [
-        (0, 2), (1, 2), (2, 2), (3, 2), (4, 2), (5, 2),
-    ].into();
+    let sizes: HashMap<usize, usize> = [(0, 2), (1, 2), (2, 2), (3, 2), (4, 2), (5, 2)].into();
 
     let mut ein = Einsum::new(
         vec![vec![0, 1, 2, 3], vec![2, 3, 4, 5]],
@@ -415,15 +402,9 @@ fn test_optimizer_4d_tensors() {
 #[test]
 fn test_optimizer_5d_tensor() {
     // abcde->ae (sum over b,c,d)
-    let sizes: HashMap<usize, usize> = [
-        (0, 2), (1, 2), (2, 2), (3, 2), (4, 2),
-    ].into();
+    let sizes: HashMap<usize, usize> = [(0, 2), (1, 2), (2, 2), (3, 2), (4, 2)].into();
 
-    let mut ein = Einsum::new(
-        vec![vec![0, 1, 2, 3, 4]],
-        vec![0, 4],
-        sizes,
-    );
+    let mut ein = Einsum::new(vec![vec![0, 1, 2, 3, 4]], vec![0, 4], sizes);
     ein.optimize_greedy();
     assert!(ein.is_optimized());
 
@@ -439,16 +420,24 @@ fn test_optimizer_5d_tensor() {
 fn test_optimizer_6d_contraction() {
     // abcdef,defghi->abcghi
     let sizes: HashMap<usize, usize> = [
-        (0, 2), (1, 2), (2, 2), (3, 2), (4, 2), (5, 2),
-        (6, 2), (7, 2), (8, 2),
-    ].into();
+        (0, 2),
+        (1, 2),
+        (2, 2),
+        (3, 2),
+        (4, 2),
+        (5, 2),
+        (6, 2),
+        (7, 2),
+        (8, 2),
+    ]
+    .into();
 
     let mut ein = Einsum::new(
         vec![
-            vec![0, 1, 2, 3, 4, 5],     // abcdef
-            vec![3, 4, 5, 6, 7, 8],     // defghi
+            vec![0, 1, 2, 3, 4, 5], // abcdef
+            vec![3, 4, 5, 6, 7, 8], // defghi
         ],
-        vec![0, 1, 2, 6, 7, 8],         // abcghi
+        vec![0, 1, 2, 6, 7, 8], // abcghi
         sizes,
     );
     ein.optimize_greedy();
@@ -477,16 +466,17 @@ fn test_optimizer_ladder_network() {
         (4, 2), // e
         (5, 3), // f - bond
         (6, 2), // g
-    ].into();
+    ]
+    .into();
 
     let mut ein = Einsum::new(
         vec![
-            vec![0, 1],       // ab
-            vec![1, 2, 3],    // bcd
-            vec![3, 4, 5],    // def
-            vec![5, 6],       // fg
+            vec![0, 1],    // ab
+            vec![1, 2, 3], // bcd
+            vec![3, 4, 5], // def
+            vec![5, 6],    // fg
         ],
-        vec![0, 2, 4, 6],     // aceg
+        vec![0, 2, 4, 6], // aceg
         sizes,
     );
     ein.optimize_greedy();
@@ -505,19 +495,17 @@ fn test_optimizer_ladder_network() {
 fn test_optimizer_grid_network() {
     // 2x2 grid-like network
     // (a,b,c,d),(b,e),(c,f),(d,e,f,g)->(a,g)
-    let sizes: HashMap<usize, usize> = [
-        (0, 2), (1, 2), (2, 2), (3, 2),
-        (4, 2), (5, 2), (6, 2),
-    ].into();
+    let sizes: HashMap<usize, usize> =
+        [(0, 2), (1, 2), (2, 2), (3, 2), (4, 2), (5, 2), (6, 2)].into();
 
     let mut ein = Einsum::new(
         vec![
-            vec![0, 1, 2, 3],  // abcd
-            vec![1, 4],        // be
-            vec![2, 5],        // cf
-            vec![3, 4, 5, 6],  // defg
+            vec![0, 1, 2, 3], // abcd
+            vec![1, 4],       // be
+            vec![2, 5],       // cf
+            vec![3, 4, 5, 6], // defg
         ],
-        vec![0, 6],            // ag
+        vec![0, 6], // ag
         sizes,
     );
     ein.optimize_greedy();
@@ -539,15 +527,9 @@ fn test_optimizer_grid_network() {
 #[test]
 fn test_optimizer_asymmetric_dimensions() {
     // Different sizes for each dimension
-    let sizes: HashMap<usize, usize> = [
-        (0, 2), (1, 3), (2, 4), (3, 5),
-    ].into();
+    let sizes: HashMap<usize, usize> = [(0, 2), (1, 3), (2, 4), (3, 5)].into();
 
-    let mut ein = Einsum::new(
-        vec![vec![0, 1], vec![1, 2], vec![2, 3]],
-        vec![0, 3],
-        sizes,
-    );
+    let mut ein = Einsum::new(vec![vec![0, 1], vec![1, 2], vec![2, 3]], vec![0, 3], sizes);
     ein.optimize_greedy();
     assert!(ein.is_optimized());
 
@@ -568,11 +550,7 @@ fn test_optimizer_large_intermediate() {
     // ab,cd,bd->ac (intermediate has all 4 dims)
     let sizes: HashMap<usize, usize> = [(0, 3), (1, 4), (2, 3), (3, 4)].into();
 
-    let mut ein = Einsum::new(
-        vec![vec![0, 1], vec![2, 3], vec![1, 3]],
-        vec![0, 2],
-        sizes,
-    );
+    let mut ein = Einsum::new(vec![vec![0, 1], vec![2, 3], vec![1, 3]], vec![0, 2], sizes);
     ein.optimize_greedy();
     assert!(ein.is_optimized());
 
@@ -605,9 +583,8 @@ fn test_optimizer_all_same_index() {
 #[test]
 fn test_optimizer_many_tensors() {
     // 6 tensor network
-    let sizes: HashMap<usize, usize> = [
-        (0, 2), (1, 2), (2, 2), (3, 2), (4, 2), (5, 2), (6, 2),
-    ].into();
+    let sizes: HashMap<usize, usize> =
+        [(0, 2), (1, 2), (2, 2), (3, 2), (4, 2), (5, 2), (6, 2)].into();
 
     let mut ein = Einsum::new(
         vec![
@@ -640,11 +617,7 @@ fn test_optimizer_reoptimize() {
     // Test that re-optimizing doesn't break anything
     let sizes: HashMap<usize, usize> = [(0, 2), (1, 2), (2, 2)].into();
 
-    let mut ein = Einsum::new(
-        vec![vec![0, 1], vec![1, 2]],
-        vec![0, 2],
-        sizes,
-    );
+    let mut ein = Einsum::new(vec![vec![0, 1], vec![1, 2]], vec![0, 2], sizes);
 
     ein.optimize_greedy();
     assert!(ein.is_optimized());

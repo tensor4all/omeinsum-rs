@@ -213,7 +213,12 @@ impl Plan {
         // Create plan preference
         let mut pref = std::ptr::null_mut();
         check(unsafe {
-            cutensorCreatePlanPreference(handle.raw(), &mut pref, super::sys::cutensorAlgo_t::DEFAULT, super::sys::cutensorJitMode_t::NONE)
+            cutensorCreatePlanPreference(
+                handle.raw(),
+                &mut pref,
+                super::sys::cutensorAlgo_t::DEFAULT,
+                super::sys::cutensorJitMode_t::NONE,
+            )
         })?;
 
         // Estimate workspace

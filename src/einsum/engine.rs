@@ -121,7 +121,7 @@ impl Einsum<usize> {
     where
         A: Algebra<Scalar = T, Index = u32>,
         T: Scalar + BackendScalar<B>,
-        B: Backend + Default,
+        B: Backend,
     {
         assert_eq!(
             tensors.len(),
@@ -142,7 +142,8 @@ impl Einsum<usize> {
                         &self.size_dict,
                     )
                 } else {
-                    self.execute_tree::<A, T, B>(tree, tensors)
+                    let result = self.execute_tree::<A, T, B>(tree, tensors);
+                    finalize_optimized_result::<A, T, B>(result, tree, &self.iy, &self.size_dict)
                 }
             }
             None => self.execute_pairwise::<A, T, B>(tensors),
@@ -160,7 +161,7 @@ impl Einsum<usize> {
     where
         A: Algebra<Scalar = T, Index = u32>,
         T: Scalar + BackendScalar<B>,
-        B: Backend + Default,
+        B: Backend,
     {
         assert_eq!(
             tensors.len(),
@@ -194,7 +195,15 @@ impl Einsum<usize> {
                         )
                     }
                 } else {
-                    self.execute_tree_with_argmax::<A, T, B>(tree, tensors, &mut argmax_cache)
+                    let result =
+                        self.execute_tree_with_argmax::<A, T, B>(tree, tensors, &mut argmax_cache);
+                    finalize_optimized_result_with_argmax::<A, T, B>(
+                        result,
+                        tree,
+                        &self.iy,
+                        &self.size_dict,
+                        &mut argmax_cache,
+                    )
                 }
             }
             None => self.execute_pairwise_with_argmax::<A, T, B>(tensors, &mut argmax_cache),
@@ -214,7 +223,7 @@ impl Einsum<usize> {
     where
         A: Algebra<Scalar = T, Index = u32>,
         T: Scalar + BackendScalar<B>,
-        B: Backend + Default,
+        B: Backend,
     {
         match tree {
             NestedEinsum::Leaf { tensor_index } => tensors[*tensor_index].clone(),
@@ -229,14 +238,23 @@ impl Einsum<usize> {
                 let ia = &eins.ixs[0];
                 let ib = &eins.ixs[1];
                 let iy = &eins.iy;
+                let (left, ia) =
+                    normalize_binary_operand::<A, T, B>(&left, ia, ib, iy, &self.size_dict);
+                let (right, ib) = normalize_binary_operand::<A, T, B>(
+                    &right,
+                    ib,
+                    ia.as_slice(),
+                    iy,
+                    &self.size_dict,
+                );
 
                 if A::needs_argmax() {
                     let (result, argmax) =
-                        left.contract_binary_with_argmax::<A>(&right, ia, ib, iy);
+                        left.contract_binary_with_argmax::<A>(&right, &ia, &ib, iy);
                     argmax_cache.push(argmax);
                     result
                 } else {
-                    left.contract_binary::<A>(&right, ia, ib, iy)
+                    left.contract_binary::<A>(&right, &ia, &ib, iy)
                 }
             }
         }
@@ -251,7 +269,7 @@ impl Einsum<usize> {
     where
         A: Algebra<Scalar = T, Index = u32>,
         T: Scalar + BackendScalar<B>,
-        B: Backend + Default,
+        B: Backend,
     {
         if tensors.is_empty() {
             panic!("Cannot execute einsum with no tensors");
@@ -291,20 +309,35 @@ impl Einsum<usize> {
                 compute_intermediate_output(&current_indices, other_indices, &self.iy)
             };
 
+            let (left, left_indices) = normalize_binary_operand::<A, T, B>(
+                &result,
+                &current_indices,
+                other_indices,
+                &intermediate_output,
+                &self.size_dict,
+            );
+            let (right, right_indices) = normalize_binary_operand::<A, T, B>(
+                other,
+                other_indices,
+                &left_indices,
+                &intermediate_output,
+                &self.size_dict,
+            );
+
             if A::needs_argmax() {
-                let (new_result, argmax) = result.contract_binary_with_argmax::<A>(
-                    other,
-                    &current_indices,
-                    other_indices,
+                let (new_result, argmax) = left.contract_binary_with_argmax::<A>(
+                    &right,
+                    &left_indices,
+                    &right_indices,
                     &intermediate_output,
                 );
                 argmax_cache.push(argmax);
                 result = new_result;
             } else {
-                result = result.contract_binary::<A>(
-                    other,
-                    &current_indices,
-                    other_indices,
+                result = left.contract_binary::<A>(
+                    &right,
+                    &left_indices,
+                    &right_indices,
                     &intermediate_output,
                 );
             }
@@ -324,7 +357,7 @@ impl Einsum<usize> {
     where
         A: Algebra<Scalar = T, Index = u32>,
         T: Scalar + BackendScalar<B>,
-        B: Backend + Default,
+        B: Backend,
     {
         match tree {
             NestedEinsum::Leaf { tensor_index } => tensors[*tensor_index].clone(),
@@ -337,8 +370,17 @@ impl Einsum<usize> {
                 let ia = &eins.ixs[0];
                 let ib = &eins.ixs[1];
                 let iy = &eins.iy;
+                let (left, ia) =
+                    normalize_binary_operand::<A, T, B>(&left, ia, ib, iy, &self.size_dict);
+                let (right, ib) = normalize_binary_operand::<A, T, B>(
+                    &right,
+                    ib,
+                    ia.as_slice(),
+                    iy,
+                    &self.size_dict,
+                );
 
-                left.contract_binary::<A>(&right, ia, ib, iy)
+                left.contract_binary::<A>(&right, &ia, &ib, iy)
             }
         }
     }
@@ -348,7 +390,7 @@ impl Einsum<usize> {
     where
         A: Algebra<Scalar = T, Index = u32>,
         T: Scalar + BackendScalar<B>,
-        B: Backend + Default,
+        B: Backend,
     {
         if tensors.is_empty() {
             panic!("Cannot execute einsum with no tensors");
@@ -381,10 +423,25 @@ impl Einsum<usize> {
                 compute_intermediate_output(&current_indices, other_indices, &self.iy)
             };
 
-            result = result.contract_binary::<A>(
-                other,
+            let (left, left_indices) = normalize_binary_operand::<A, T, B>(
+                &result,
                 &current_indices,
                 other_indices,
+                &intermediate_output,
+                &self.size_dict,
+            );
+            let (right, right_indices) = normalize_binary_operand::<A, T, B>(
+                other,
+                other_indices,
+                &left_indices,
+                &intermediate_output,
+                &self.size_dict,
+            );
+
+            result = left.contract_binary::<A>(
+                &right,
+                &left_indices,
+                &right_indices,
                 &intermediate_output,
             );
             current_indices = intermediate_output;
@@ -416,6 +473,101 @@ fn compute_intermediate_output(ia: &[usize], ib: &[usize], final_output: &[usize
     }
 
     output
+}
+
+fn compute_normalized_binary_indices(
+    ix: &[usize],
+    other: &[usize],
+    output: &[usize],
+) -> Vec<usize> {
+    let other_set: HashSet<usize> = other.iter().copied().collect();
+    let output_set: HashSet<usize> = output.iter().copied().collect();
+    let mut normalized = Vec::new();
+    let mut seen = HashSet::new();
+
+    for &idx in ix {
+        if (other_set.contains(&idx) || output_set.contains(&idx)) && seen.insert(idx) {
+            normalized.push(idx);
+        }
+    }
+
+    normalized
+}
+
+pub(crate) fn normalize_binary_operand<A, T, B>(
+    tensor: &Tensor<T, B>,
+    ix: &[usize],
+    other: &[usize],
+    output: &[usize],
+    size_dict: &HashMap<usize, usize>,
+) -> (Tensor<T, B>, Vec<usize>)
+where
+    A: Algebra<Scalar = T>,
+    T: Scalar,
+    B: Backend,
+{
+    let normalized_ix = compute_normalized_binary_indices(ix, other, output);
+    if normalized_ix == ix {
+        (tensor.clone(), normalized_ix)
+    } else {
+        (
+            execute_unary_naive::<A, T, B>(tensor, ix, &normalized_ix, size_dict),
+            normalized_ix,
+        )
+    }
+}
+
+fn optimized_tree_output(tree: &NestedEinsum<usize>) -> &[usize] {
+    match tree {
+        NestedEinsum::Leaf { .. } => {
+            unreachable!("top-level leaf should be handled before finalizing optimized output")
+        }
+        NestedEinsum::Node { eins, .. } => &eins.iy,
+    }
+}
+
+fn finalize_optimized_result<A, T, B>(
+    result: Tensor<T, B>,
+    tree: &NestedEinsum<usize>,
+    expected_output: &[usize],
+    size_dict: &HashMap<usize, usize>,
+) -> Tensor<T, B>
+where
+    A: Algebra<Scalar = T>,
+    T: Scalar,
+    B: Backend,
+{
+    let tree_output = optimized_tree_output(tree);
+    if tree_output == expected_output {
+        result
+    } else {
+        execute_unary_naive::<A, T, B>(&result, tree_output, expected_output, size_dict)
+    }
+}
+
+fn finalize_optimized_result_with_argmax<A, T, B>(
+    result: Tensor<T, B>,
+    tree: &NestedEinsum<usize>,
+    expected_output: &[usize],
+    size_dict: &HashMap<usize, usize>,
+    argmax_cache: &mut Vec<Tensor<u32, B>>,
+) -> Tensor<T, B>
+where
+    A: Algebra<Scalar = T, Index = u32>,
+    T: Scalar,
+    B: Backend,
+{
+    let tree_output = optimized_tree_output(tree);
+    if tree_output == expected_output {
+        result
+    } else if A::needs_argmax() {
+        let (result, argmax) =
+            execute_unary_with_argmax::<A, T, B>(&result, tree_output, expected_output, size_dict);
+        argmax_cache.push(argmax);
+        result
+    } else {
+        execute_unary_naive::<A, T, B>(&result, tree_output, expected_output, size_dict)
+    }
 }
 
 /// Convert linear index to multi-dimensional index (column-major).
@@ -503,7 +655,7 @@ pub(crate) fn execute_unary_naive<A, T, B>(
 where
     A: Algebra<Scalar = T>,
     T: Scalar,
-    B: Backend + Default,
+    B: Backend,
 {
     // 1. Classify indices
     // outer = output indices
@@ -573,11 +725,7 @@ where
         out_data[out_linear] = acc.to_scalar();
     }
 
-    if out_shape.is_empty() {
-        Tensor::from_data(&out_data, &[])
-    } else {
-        Tensor::from_data(&out_data, &out_shape)
-    }
+    Tensor::from_data_with_backend(&out_data, &out_shape, tensor.backend().clone())
 }
 
 /// Execute unary einsum with argmax tracking for tropical algebras.
@@ -596,7 +744,7 @@ pub(crate) fn execute_unary_with_argmax<A, T, B>(
 where
     A: Algebra<Scalar = T, Index = u32>,
     T: Scalar,
-    B: Backend + Default,
+    B: Backend,
 {
     // 1. Classify indices (same as execute_unary_naive)
     let outer: &[usize] = iy;
@@ -668,17 +816,8 @@ where
         argmax_data[out_linear] = best_in_pos as u32;
     }
 
-    let result = if out_shape.is_empty() {
-        Tensor::from_data(&out_data, &[])
-    } else {
-        Tensor::from_data(&out_data, &out_shape)
-    };
-
-    let argmax = if out_shape.is_empty() {
-        Tensor::from_data(&argmax_data, &[])
-    } else {
-        Tensor::from_data(&argmax_data, &out_shape)
-    };
+    let result = Tensor::from_data_with_backend(&out_data, &out_shape, tensor.backend().clone());
+    let argmax = Tensor::from_data_with_backend(&argmax_data, &out_shape, tensor.backend().clone());
 
     (result, argmax)
 }
@@ -809,6 +948,55 @@ mod tests {
         let result = ein.execute::<MaxPlus<f32>, f32, Cpu>(&[&a]);
         // tropical trace = max(1, 4) = 4
         assert_eq!(result.to_vec()[0], 4.0);
+    }
+
+    #[test]
+    fn test_einsum_binary_repeated_left_label_pairwise() {
+        // ii,ij->j should contract the diagonal of the left input with the right input.
+        let a = Tensor::<f64, Cpu>::from_data(&[1.0, 2.0, 3.0, 4.0], &[2, 2]);
+        let b = Tensor::<f64, Cpu>::from_data(&[1.0, 0.0, 0.0, 1.0], &[2, 2]);
+
+        let sizes: HashMap<usize, usize> = [(0, 2), (1, 2)].into();
+        let ein = Einsum::new(vec![vec![0, 0], vec![0, 1]], vec![1], sizes);
+
+        let result = ein.execute::<Standard<f64>, f64, Cpu>(&[&a, &b]);
+        assert_eq!(result.shape(), &[2]);
+        assert_eq!(result.to_vec(), vec![1.0, 4.0]);
+    }
+
+    #[test]
+    fn test_einsum_binary_repeated_left_label_optimized() {
+        // iib,bc->ic should first extract the diagonal across the repeated i label.
+        let a =
+            Tensor::<f64, Cpu>::from_data(&[1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0], &[2, 2, 2]);
+        let b = Tensor::<f64, Cpu>::from_data(&[1.0, 0.0, 0.0, 1.0], &[2, 2]);
+
+        let sizes: HashMap<usize, usize> = [(0, 2), (1, 2), (2, 2)].into();
+        let mut ein = Einsum::new(vec![vec![0, 0, 1], vec![1, 2]], vec![0, 2], sizes);
+        ein.optimize_greedy();
+
+        let result = ein.execute::<Standard<f64>, f64, Cpu>(&[&a, &b]);
+        assert_eq!(result.shape(), &[2, 2]);
+        assert_eq!(result.to_vec(), vec![1.0, 4.0, 5.0, 8.0]);
+    }
+
+    #[test]
+    fn test_einsum_binary_repeated_label_reduced_to_scalar_before_contract() {
+        // ii,jk->jk should trace the left input to a scalar and scale the right input.
+        let a = Tensor::<f64, Cpu>::from_data(&[1.0, 2.0, 3.0, 4.0], &[2, 2]);
+        let b = Tensor::<f64, Cpu>::from_data(&[1.0, 2.0, 3.0, 4.0], &[2, 2]);
+
+        let sizes: HashMap<usize, usize> = [(0, 2), (1, 2), (2, 2)].into();
+        let mut ein = Einsum::new(vec![vec![0, 0], vec![1, 2]], vec![1, 2], sizes);
+
+        let result = ein.execute::<Standard<f64>, f64, Cpu>(&[&a, &b]);
+        assert_eq!(result.shape(), &[2, 2]);
+        assert_eq!(result.to_vec(), vec![5.0, 10.0, 15.0, 20.0]);
+
+        ein.optimize_greedy();
+        let optimized = ein.execute::<Standard<f64>, f64, Cpu>(&[&a, &b]);
+        assert_eq!(optimized.shape(), &[2, 2]);
+        assert_eq!(optimized.to_vec(), vec![5.0, 10.0, 15.0, 20.0]);
     }
 
     // Tests for helper functions

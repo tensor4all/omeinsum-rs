@@ -32,11 +32,8 @@ fn test_einsum_three_matrix_chain_to_14() {
     let b = Tensor::<f64, Cpu>::from_data(&[1.0, 0.0, 0.0, 1.0], &[2, 2]);
     let c = Tensor::<f64, Cpu>::from_data(&[2.0, 0.0, 0.0, 2.0], &[2, 2]);
 
-    let result = einsum::<Standard<f64>, _, _>(
-        &[&a, &b, &c],
-        &[&[0, 1], &[1, 2], &[2, 3]],
-        &[0, 3],
-    );
+    let result =
+        einsum::<Standard<f64>, _, _>(&[&a, &b, &c], &[&[0, 1], &[1, 2], &[2, 3]], &[0, 3]);
 
     assert_eq!(result.shape(), &[2, 2]);
     // I @ A @ 2I = 2A
@@ -49,11 +46,8 @@ fn test_einsum_three_matrix_chain_to_41() {
     let b = Tensor::<f64, Cpu>::from_data(&[1.0, 0.0, 0.0, 1.0], &[2, 2]);
     let c = Tensor::<f64, Cpu>::from_data(&[1.0, 0.0, 0.0, 1.0], &[2, 2]);
 
-    let result = einsum::<Standard<f64>, _, _>(
-        &[&a, &b, &c],
-        &[&[0, 1], &[1, 2], &[2, 3]],
-        &[3, 0],
-    );
+    let result =
+        einsum::<Standard<f64>, _, _>(&[&a, &b, &c], &[&[0, 1], &[1, 2], &[2, 3]], &[3, 0]);
 
     assert_eq!(result.shape(), &[2, 2]);
 }
@@ -233,11 +227,7 @@ fn test_einsum_star_contraction() {
     let c = Tensor::<f64, Cpu>::from_data(&[1.0, 0.0, 0.0, 1.0], &[2, 2]);
 
     // Using indices: a=0, i=1
-    let result = einsum::<Standard<f64>, _, _>(
-        &[&a, &b, &c],
-        &[&[0, 1], &[0, 1], &[0, 1]],
-        &[0],
-    );
+    let result = einsum::<Standard<f64>, _, _>(&[&a, &b, &c], &[&[0, 1], &[0, 1], &[0, 1]], &[0]);
 
     assert_eq!(result.shape(), &[2]);
 }
@@ -250,11 +240,8 @@ fn test_einsum_star_to_output() {
     let c = Tensor::<f64, Cpu>::from_data(&[1.0, 0.0, 0.0, 1.0], &[2, 2]);
 
     // a=0, b=1, c=2, i=3
-    let result = einsum::<Standard<f64>, _, _>(
-        &[&a, &b, &c],
-        &[&[0, 3], &[1, 3], &[2, 3]],
-        &[0, 1, 2],
-    );
+    let result =
+        einsum::<Standard<f64>, _, _>(&[&a, &b, &c], &[&[0, 3], &[1, 3], &[2, 3]], &[0, 1, 2]);
 
     assert_eq!(result.shape(), &[2, 2, 2]);
 }
@@ -267,11 +254,7 @@ fn test_einsum_star_and_contract() {
     let c = Tensor::<f64, Cpu>::from_data(&[1.0, 0.0, 0.0, 1.0], &[2, 2]);
 
     // a=0, i=1, l=2
-    let result = einsum::<Standard<f64>, _, _>(
-        &[&a, &b, &c],
-        &[&[0, 1], &[0, 1], &[0, 2]],
-        &[2],
-    );
+    let result = einsum::<Standard<f64>, _, _>(&[&a, &b, &c], &[&[0, 1], &[0, 1], &[0, 2]], &[2]);
 
     assert_eq!(result.shape(), &[2]);
 }
@@ -398,11 +381,8 @@ fn test_einsum_tensor_network_cycle() {
     let a = Tensor::<f64, Cpu>::from_data(&[1.0; 16], &[2, 2, 2, 2]);
     let b = Tensor::<f64, Cpu>::from_data(&[1.0; 16], &[2, 2, 2, 2]);
 
-    let result = einsum::<Standard<f64>, _, _>(
-        &[&a, &b],
-        &[&[0, 1, 2, 3], &[1, 2, 4, 5]],
-        &[0, 3, 4, 5],
-    );
+    let result =
+        einsum::<Standard<f64>, _, _>(&[&a, &b], &[&[0, 1, 2, 3], &[1, 2, 4, 5]], &[0, 3, 4, 5]);
 
     assert_eq!(result.shape(), &[2, 2, 2, 2]);
 }
@@ -430,11 +410,7 @@ fn test_einsum_large_contraction() {
     let a = Tensor::<f64, Cpu>::from_data(&vec![1.0; 1000], &[10, 10, 10]);
     let b = Tensor::<f64, Cpu>::from_data(&vec![1.0; 1000], &[10, 10, 10]);
 
-    let result = einsum::<Standard<f64>, _, _>(
-        &[&a, &b],
-        &[&[0, 1, 2], &[1, 2, 3]],
-        &[0, 3],
-    );
+    let result = einsum::<Standard<f64>, _, _>(&[&a, &b], &[&[0, 1, 2], &[1, 2, 3]], &[0, 3]);
 
     assert_eq!(result.shape(), &[10, 10]);
     // Each element should be sum over 10*10 = 100 ones
@@ -614,11 +590,8 @@ fn test_einsum_einsum_bilinear() {
     let b = Tensor::<f64, Cpu>::from_data(&[1.0; 4], &[2, 2]);
     let c = Tensor::<f64, Cpu>::from_data(&[1.0; 4], &[2, 2]);
 
-    let result = einsum::<Standard<f64>, _, _>(
-        &[&a, &b, &c],
-        &[&[0, 1], &[1, 2], &[0, 3]],
-        &[3, 2],
-    );
+    let result =
+        einsum::<Standard<f64>, _, _>(&[&a, &b, &c], &[&[0, 1], &[1, 2], &[0, 3]], &[3, 2]);
     assert_eq!(result.shape(), &[2, 2]);
 }
 
@@ -739,7 +712,13 @@ fn test_einsum_five_tensor_contraction() {
 
     // Each tensor has shape [2,2] with first index being its own, second shared
     let result = einsum::<Standard<f64>, _, _>(
-        &[&tensors[0], &tensors[1], &tensors[2], &tensors[3], &tensors[4]],
+        &[
+            &tensors[0],
+            &tensors[1],
+            &tensors[2],
+            &tensors[3],
+            &tensors[4],
+        ],
         &[&[0, 5], &[1, 5], &[2, 5], &[3, 5], &[4, 5]],
         &[0, 1, 2, 3, 4],
     );
@@ -792,7 +771,10 @@ fn test_einsum_cyclic_contraction() {
 #[test]
 fn test_einsum_reshape_via_permute() {
     // ijkl -> iljk (complex permutation)
-    let t = Tensor::<f64, Cpu>::from_data(&(1..=24).map(|x| x as f64).collect::<Vec<_>>(), &[2, 3, 2, 2]);
+    let t = Tensor::<f64, Cpu>::from_data(
+        &(1..=24).map(|x| x as f64).collect::<Vec<_>>(),
+        &[2, 3, 2, 2],
+    );
 
     let sizes: HashMap<usize, usize> = [(0, 2), (1, 3), (2, 2), (3, 2)].into();
     let ein = Einsum::new(vec![vec![0, 1, 2, 3]], vec![0, 3, 1, 2], sizes);
@@ -808,7 +790,8 @@ fn test_einsum_mixed_batch_contraction() {
     let a = Tensor::<f64, Cpu>::from_data(&vec![1.0; 48], &[2, 2, 3, 4]);
     let b = Tensor::<f64, Cpu>::from_data(&vec![1.0; 40], &[2, 4, 5]);
 
-    let result = einsum::<Standard<f64>, _, _>(&[&a, &b], &[&[0, 1, 2, 3], &[0, 3, 4]], &[0, 1, 2, 4]);
+    let result =
+        einsum::<Standard<f64>, _, _>(&[&a, &b], &[&[0, 1, 2, 3], &[0, 3, 4]], &[0, 1, 2, 4]);
     assert_eq!(result.shape(), &[2, 2, 3, 5]);
     // Each element is sum over k=4
     for &v in result.to_vec().iter() {

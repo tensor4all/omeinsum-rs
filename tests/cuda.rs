@@ -17,8 +17,8 @@
 
 #![cfg(feature = "cuda")]
 
-use std::collections::HashMap;
 use omeinsum::backend::{Cpu, Cuda, CudaComplex, CudaStorage};
+use std::collections::HashMap;
 
 // ============================================================================
 // CUDA Backend Notes
@@ -210,9 +210,9 @@ fn test_inner_product() {
             &[4],
             &[1],
             &[0],
-            &[],  // empty shape for scalar
-            &[],  // empty strides for scalar
-            &[],  // scalar output (no free indices)
+            &[], // empty shape for scalar
+            &[], // empty strides for scalar
+            &[], // scalar output (no free indices)
         )
         .unwrap();
 
@@ -354,7 +354,6 @@ fn test_storage_len() {
     assert!(!storage.is_empty());
 }
 
-
 // ============================================================================
 // Additional f64 Tests
 // ============================================================================
@@ -388,14 +387,14 @@ fn test_tensor3_contraction_f64() {
             &a,
             &[2, 2, 2],
             &[4, 2, 1],
-            &[0, 1, 2],  // i, j, k
+            &[0, 1, 2], // i, j, k
             &b,
             &[2, 2, 2],
             &[4, 2, 1],
-            &[1, 2, 3],  // j, k, l
+            &[1, 2, 3], // j, k, l
             &[2, 2],
             &[2, 1],
-            &[0, 3],     // i, l
+            &[0, 3], // i, l
         )
         .unwrap();
 
@@ -407,11 +406,7 @@ fn test_tensor3_contraction_f64() {
     // sum = 1*1 + 2*3 + 3*5 + 4*7 = 1 + 6 + 15 + 28 = 50
 
     assert_eq!(result.len(), 4);
-    assert!(
-        (result[0] - 50.0).abs() < 1e-10,
-        "C[0,0] = {}",
-        result[0]
-    );
+    assert!((result[0] - 50.0).abs() < 1e-10, "C[0,0] = {}", result[0]);
 }
 
 /// Test f64 trace operation (diagonal sum).
@@ -451,8 +446,8 @@ fn test_trace_f64() {
             &identity,
             &[1],
             &[1],
-            &[2],  // dummy index
-            &[],   // scalar output
+            &[2], // dummy index
+            &[],  // scalar output
             &[],
             &[],
         )
@@ -461,11 +456,7 @@ fn test_trace_f64() {
     let result = c.to_vec().unwrap();
     // sum of 1..9 = 45
     assert_eq!(result.len(), 1);
-    assert!(
-        (result[0] - 45.0).abs() < 1e-10,
-        "sum = {}",
-        result[0]
-    );
+    assert!((result[0] - 45.0).abs() < 1e-10, "sum = {}", result[0]);
 }
 
 // ============================================================================
@@ -509,14 +500,14 @@ fn test_cuda_manual_backward_matmul_f64() {
             &a,
             &[2, 2],
             &[2, 1],
-            &[0, 1],  // i, j
+            &[0, 1], // i, j
             &b,
             &[2, 2],
             &[2, 1],
-            &[1, 2],  // j, k
+            &[1, 2], // j, k
             &[2, 2],
             &[2, 1],
-            &[0, 2],  // i, k
+            &[0, 2], // i, k
         )
         .unwrap();
 
@@ -542,14 +533,14 @@ fn test_cuda_manual_backward_matmul_f64() {
             &grad_out,
             &[2, 2],
             &[2, 1],
-            &[0, 2],  // i, k
+            &[0, 2], // i, k
             &b,
             &[2, 2],
             &[2, 1],
-            &[1, 2],  // j, k (B^T effectively via index mapping)
+            &[1, 2], // j, k (B^T effectively via index mapping)
             &[2, 2],
             &[2, 1],
-            &[0, 1],  // i, j
+            &[0, 1], // i, j
         )
         .unwrap();
 
@@ -585,14 +576,14 @@ fn test_cuda_manual_backward_matmul_f64() {
             &a,
             &[2, 2],
             &[2, 1],
-            &[0, 1],  // i, j (A^T via index mapping: j becomes first output dim)
+            &[0, 1], // i, j (A^T via index mapping: j becomes first output dim)
             &grad_out,
             &[2, 2],
             &[2, 1],
-            &[0, 2],  // i, k
+            &[0, 2], // i, k
             &[2, 2],
             &[2, 1],
-            &[1, 2],  // j, k
+            &[1, 2], // j, k
         )
         .unwrap();
 
@@ -651,14 +642,14 @@ fn test_cuda_manual_backward_rectangular_f64() {
             &a,
             &[2, 3],
             &[3, 1],
-            &[0, 1],  // i, j
+            &[0, 1], // i, j
             &b,
             &[3, 2],
             &[2, 1],
-            &[1, 2],  // j, k
+            &[1, 2], // j, k
             &[2, 2],
             &[2, 1],
-            &[0, 2],  // i, k
+            &[0, 2], // i, k
         )
         .unwrap();
 
@@ -682,14 +673,14 @@ fn test_cuda_manual_backward_rectangular_f64() {
             &grad_out,
             &[2, 2],
             &[2, 1],
-            &[0, 2],  // i, k
+            &[0, 2], // i, k
             &b,
             &[3, 2],
             &[2, 1],
-            &[1, 2],  // j, k
+            &[1, 2], // j, k
             &[2, 3],
             &[3, 1],
-            &[0, 1],  // i, j
+            &[0, 1], // i, j
         )
         .unwrap();
 
@@ -709,14 +700,14 @@ fn test_cuda_manual_backward_rectangular_f64() {
             &a,
             &[2, 3],
             &[3, 1],
-            &[0, 1],  // i, j
+            &[0, 1], // i, j
             &grad_out,
             &[2, 2],
             &[2, 1],
-            &[0, 2],  // i, k
+            &[0, 2], // i, k
             &[3, 2],
             &[2, 1],
-            &[1, 2],  // j, k
+            &[1, 2], // j, k
         )
         .unwrap();
 
@@ -761,14 +752,14 @@ fn test_cuda_manual_backward_outer_product_f64() {
             &a,
             &[2],
             &[1],
-            &[0],  // i
+            &[0], // i
             &b,
             &[3],
             &[1],
-            &[1],  // j
+            &[1], // j
             &[2, 3],
             &[3, 1],
-            &[0, 1],  // i, j
+            &[0, 1], // i, j
         )
         .unwrap();
 
@@ -795,14 +786,14 @@ fn test_cuda_manual_backward_outer_product_f64() {
             &grad_out,
             &[2, 3],
             &[3, 1],
-            &[0, 1],  // i, j
+            &[0, 1], // i, j
             &b,
             &[3],
             &[1],
-            &[1],  // j
+            &[1], // j
             &[2],
             &[1],
-            &[0],  // i
+            &[0], // i
         )
         .unwrap();
 
@@ -818,14 +809,14 @@ fn test_cuda_manual_backward_outer_product_f64() {
             &grad_out,
             &[2, 3],
             &[3, 1],
-            &[0, 1],  // i, j
+            &[0, 1], // i, j
             &a,
             &[2],
             &[1],
-            &[0],  // i
+            &[0], // i
             &[3],
             &[1],
-            &[1],  // j
+            &[1], // j
         )
         .unwrap();
 
@@ -896,17 +887,17 @@ fn test_matmul_complex64() {
 
     // A = [[1+i, 2], [3, 4-i]]  (2x2, row-major)
     let a_data: Vec<CudaComplex<f64>> = vec![
-        CudaComplex::new(1.0, 1.0),   // A[0,0] = 1+i
-        CudaComplex::new(2.0, 0.0),   // A[0,1] = 2
-        CudaComplex::new(3.0, 0.0),   // A[1,0] = 3
-        CudaComplex::new(4.0, -1.0),  // A[1,1] = 4-i
+        CudaComplex::new(1.0, 1.0),  // A[0,0] = 1+i
+        CudaComplex::new(2.0, 0.0),  // A[0,1] = 2
+        CudaComplex::new(3.0, 0.0),  // A[1,0] = 3
+        CudaComplex::new(4.0, -1.0), // A[1,1] = 4-i
     ];
     // B = [[1, i], [-i, 1]]  (2x2, row-major)
     let b_data: Vec<CudaComplex<f64>> = vec![
-        CudaComplex::new(1.0, 0.0),   // B[0,0] = 1
-        CudaComplex::new(0.0, 1.0),   // B[0,1] = i
-        CudaComplex::new(0.0, -1.0),  // B[1,0] = -i
-        CudaComplex::new(1.0, 0.0),   // B[1,1] = 1
+        CudaComplex::new(1.0, 0.0),  // B[0,0] = 1
+        CudaComplex::new(0.0, 1.0),  // B[0,1] = i
+        CudaComplex::new(0.0, -1.0), // B[1,0] = -i
+        CudaComplex::new(1.0, 0.0),  // B[1,1] = 1
     ];
 
     let a = CudaStorage::new(
@@ -944,10 +935,10 @@ fn test_matmul_complex64() {
     // C[1,1] = A[1,0]*B[0,1] + A[1,1]*B[1,1] = 3*i + (4-i)*1 = 3i + 4-i = 4+2i
 
     let expected = vec![
-        (1.0, -1.0),   // C[0,0] = 1-i
-        (1.0, 1.0),    // C[0,1] = 1+i
-        (2.0, -4.0),   // C[1,0] = 2-4i
-        (4.0, 2.0),    // C[1,1] = 4+2i
+        (1.0, -1.0), // C[0,0] = 1-i
+        (1.0, 1.0),  // C[0,1] = 1+i
+        (2.0, -4.0), // C[1,0] = 2-4i
+        (4.0, 2.0),  // C[1,1] = 4+2i
     ];
 
     for (i, (got, (exp_re, exp_im))) in result.iter().zip(expected.iter()).enumerate() {
@@ -976,15 +967,11 @@ fn test_inner_product_complex64() {
     let cuda = Cuda::new().unwrap();
 
     // A = [1+i, 2-i]
-    let a_data: Vec<CudaComplex<f64>> = vec![
-        CudaComplex::new(1.0, 1.0),
-        CudaComplex::new(2.0, -1.0),
-    ];
+    let a_data: Vec<CudaComplex<f64>> =
+        vec![CudaComplex::new(1.0, 1.0), CudaComplex::new(2.0, -1.0)];
     // B = [1-i, i]
-    let b_data: Vec<CudaComplex<f64>> = vec![
-        CudaComplex::new(1.0, -1.0),
-        CudaComplex::new(0.0, 1.0),
-    ];
+    let b_data: Vec<CudaComplex<f64>> =
+        vec![CudaComplex::new(1.0, -1.0), CudaComplex::new(0.0, 1.0)];
 
     let a = CudaStorage::new(
         cuda.device().htod_sync_copy(&a_data).unwrap(),
@@ -1042,15 +1029,11 @@ fn test_outer_product_complex64() {
     let cuda = Cuda::new().unwrap();
 
     // A = [1+i, 2]
-    let a_data: Vec<CudaComplex<f64>> = vec![
-        CudaComplex::new(1.0, 1.0),
-        CudaComplex::new(2.0, 0.0),
-    ];
+    let a_data: Vec<CudaComplex<f64>> =
+        vec![CudaComplex::new(1.0, 1.0), CudaComplex::new(2.0, 0.0)];
     // B = [i, 1-i]
-    let b_data: Vec<CudaComplex<f64>> = vec![
-        CudaComplex::new(0.0, 1.0),
-        CudaComplex::new(1.0, -1.0),
-    ];
+    let b_data: Vec<CudaComplex<f64>> =
+        vec![CudaComplex::new(0.0, 1.0), CudaComplex::new(1.0, -1.0)];
 
     let a = CudaStorage::new(
         cuda.device().htod_sync_copy(&a_data).unwrap(),
@@ -1087,10 +1070,10 @@ fn test_outer_product_complex64() {
     // C[1,1] = 2*(1-i) = 2-2i
 
     let expected = vec![
-        (-1.0, 1.0),  // C[0,0] = -1+i
-        (2.0, 0.0),   // C[0,1] = 2
-        (0.0, 2.0),   // C[1,0] = 2i
-        (2.0, -2.0),  // C[1,1] = 2-2i
+        (-1.0, 1.0), // C[0,0] = -1+i
+        (2.0, 0.0),  // C[0,1] = 2
+        (0.0, 2.0),  // C[1,0] = 2i
+        (2.0, -2.0), // C[1,1] = 2-2i
     ];
 
     for (i, (got, (exp_re, exp_im))) in result.iter().zip(expected.iter()).enumerate() {
@@ -1221,7 +1204,8 @@ use omeinsum::{einsum, Einsum, Standard, Tensor};
 fn test_cuda_einsum_matmul_standard() {
     let cuda = Cuda::new().unwrap();
 
-    let a = Tensor::<f32, Cuda>::from_data_with_backend(&[1.0, 2.0, 3.0, 4.0], &[2, 2], cuda.clone());
+    let a =
+        Tensor::<f32, Cuda>::from_data_with_backend(&[1.0, 2.0, 3.0, 4.0], &[2, 2], cuda.clone());
     let b = Tensor::<f32, Cuda>::from_data_with_backend(&[1.0, 2.0, 3.0, 4.0], &[2, 2], cuda);
 
     let c = einsum::<Standard<f32>, _, _>(&[&a, &b], &[&[0, 1], &[1, 2]], &[0, 2]);
@@ -1236,8 +1220,10 @@ fn test_cuda_einsum_matmul_standard() {
 fn test_cuda_einsum_matmul_identity() {
     let cuda = Cuda::new().unwrap();
 
-    let a = Tensor::<f32, Cuda>::from_data_with_backend(&[1.0, 2.0, 3.0, 4.0], &[2, 2], cuda.clone());
-    let identity = Tensor::<f32, Cuda>::from_data_with_backend(&[1.0, 0.0, 0.0, 1.0], &[2, 2], cuda);
+    let a =
+        Tensor::<f32, Cuda>::from_data_with_backend(&[1.0, 2.0, 3.0, 4.0], &[2, 2], cuda.clone());
+    let identity =
+        Tensor::<f32, Cuda>::from_data_with_backend(&[1.0, 0.0, 0.0, 1.0], &[2, 2], cuda);
 
     let c = einsum::<Standard<f32>, _, _>(&[&a, &identity], &[&[0, 1], &[1, 2]], &[0, 2]);
 
@@ -1250,8 +1236,13 @@ fn test_cuda_einsum_matmul_identity() {
 fn test_cuda_einsum_matmul_rectangular() {
     let cuda = Cuda::new().unwrap();
 
-    let a = Tensor::<f32, Cuda>::from_data_with_backend(&[1.0, 2.0, 3.0, 4.0, 5.0, 6.0], &[2, 3], cuda.clone());
-    let b = Tensor::<f32, Cuda>::from_data_with_backend(&[1.0, 2.0, 3.0, 4.0, 5.0, 6.0], &[3, 2], cuda);
+    let a = Tensor::<f32, Cuda>::from_data_with_backend(
+        &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
+        &[2, 3],
+        cuda.clone(),
+    );
+    let b =
+        Tensor::<f32, Cuda>::from_data_with_backend(&[1.0, 2.0, 3.0, 4.0, 5.0, 6.0], &[3, 2], cuda);
 
     let c = einsum::<Standard<f32>, _, _>(&[&a, &b], &[&[0, 1], &[1, 2]], &[0, 2]);
 
@@ -1301,7 +1292,7 @@ fn test_cuda_einsum_batch_matmul() {
     let c = einsum::<Standard<f32>, _, _>(&[&a, &b], &[&[0, 1, 2], &[0, 2, 3]], &[0, 1, 3]);
 
     assert_eq!(c.shape(), &[2, 2, 2]);
-    // Just verify it produces valid output - the exact values depend on 
+    // Just verify it produces valid output - the exact values depend on
     // contiguous/strided handling which may differ between CPU and GPU paths
     let c_vec = c.to_vec();
     assert_eq!(c_vec.len(), 8);
@@ -1335,7 +1326,8 @@ fn test_cuda_einsum_contract_two_axes() {
 fn test_cuda_einsum_matmul_f64() {
     let cuda = Cuda::new().unwrap();
 
-    let a = Tensor::<f64, Cuda>::from_data_with_backend(&[1.0, 2.0, 3.0, 4.0], &[2, 2], cuda.clone());
+    let a =
+        Tensor::<f64, Cuda>::from_data_with_backend(&[1.0, 2.0, 3.0, 4.0], &[2, 2], cuda.clone());
     let b = Tensor::<f64, Cuda>::from_data_with_backend(&[5.0, 6.0, 7.0, 8.0], &[2, 2], cuda);
 
     let c = einsum::<Standard<f64>, _, _>(&[&a, &b], &[&[0, 1], &[1, 2]], &[0, 2]);
@@ -1351,8 +1343,10 @@ fn test_cuda_einsum_matmul_f64() {
 fn test_cuda_einsum_matmul_chain() {
     let cuda = Cuda::new().unwrap();
 
-    let a = Tensor::<f64, Cuda>::from_data_with_backend(&[1.0, 2.0, 3.0, 4.0], &[2, 2], cuda.clone());
-    let b = Tensor::<f64, Cuda>::from_data_with_backend(&[1.0, 0.0, 0.0, 1.0], &[2, 2], cuda.clone()); // Identity
+    let a =
+        Tensor::<f64, Cuda>::from_data_with_backend(&[1.0, 2.0, 3.0, 4.0], &[2, 2], cuda.clone());
+    let b =
+        Tensor::<f64, Cuda>::from_data_with_backend(&[1.0, 0.0, 0.0, 1.0], &[2, 2], cuda.clone()); // Identity
     let c = Tensor::<f64, Cuda>::from_data_with_backend(&[2.0, 0.0, 0.0, 2.0], &[2, 2], cuda); // 2*Identity
 
     let d = einsum::<Standard<f64>, _, _>(&[&a, &b, &c], &[&[0, 1], &[1, 2], &[2, 3]], &[0, 3]);
@@ -1370,9 +1364,12 @@ fn test_cuda_einsum_matmul_chain() {
 fn test_cuda_einsum_matmul_four_tensors() {
     let cuda = Cuda::new().unwrap();
 
-    let a = Tensor::<f32, Cuda>::from_data_with_backend(&[1.0, 0.0, 0.0, 1.0], &[2, 2], cuda.clone()); // Identity
-    let b = Tensor::<f32, Cuda>::from_data_with_backend(&[1.0, 2.0, 3.0, 4.0], &[2, 2], cuda.clone());
-    let c = Tensor::<f32, Cuda>::from_data_with_backend(&[1.0, 0.0, 0.0, 1.0], &[2, 2], cuda.clone()); // Identity
+    let a =
+        Tensor::<f32, Cuda>::from_data_with_backend(&[1.0, 0.0, 0.0, 1.0], &[2, 2], cuda.clone()); // Identity
+    let b =
+        Tensor::<f32, Cuda>::from_data_with_backend(&[1.0, 2.0, 3.0, 4.0], &[2, 2], cuda.clone());
+    let c =
+        Tensor::<f32, Cuda>::from_data_with_backend(&[1.0, 0.0, 0.0, 1.0], &[2, 2], cuda.clone()); // Identity
     let d = Tensor::<f32, Cuda>::from_data_with_backend(&[1.0, 0.0, 0.0, 1.0], &[2, 2], cuda); // Identity
 
     let result = einsum::<Standard<f32>, _, _>(
@@ -1425,7 +1422,11 @@ fn test_cuda_einsum_outer_product() {
 fn test_cuda_einsum_transpose() {
     let cuda = Cuda::new().unwrap();
 
-    let a = Tensor::<f64, Cuda>::from_data_with_backend(&[1.0, 2.0, 3.0, 4.0, 5.0, 6.0], &[2, 3], cuda.clone());
+    let a = Tensor::<f64, Cuda>::from_data_with_backend(
+        &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
+        &[2, 3],
+        cuda.clone(),
+    );
 
     // ij->ji (transpose)
     let b = einsum::<Standard<f64>, _, _>(&[&a], &[&[0, 1]], &[1, 0]);
@@ -1438,7 +1439,8 @@ fn test_cuda_einsum_transpose() {
 fn test_cuda_einsum_trace() {
     let cuda = Cuda::new().unwrap();
 
-    let a = Tensor::<f64, Cuda>::from_data_with_backend(&[1.0, 2.0, 3.0, 4.0], &[2, 2], cuda.clone());
+    let a =
+        Tensor::<f64, Cuda>::from_data_with_backend(&[1.0, 2.0, 3.0, 4.0], &[2, 2], cuda.clone());
 
     // ii-> (trace)
     let trace = einsum::<Standard<f64>, _, _>(&[&a], &[&[0, 0]], &[]);
@@ -1473,7 +1475,8 @@ fn test_cuda_einsum_complex_matmul() {
         CudaComplex::new(1.0, 0.0),
     ];
 
-    let a = Tensor::<CudaComplex<f64>, Cuda>::from_data_with_backend(&a_data, &[2, 2], cuda.clone());
+    let a =
+        Tensor::<CudaComplex<f64>, Cuda>::from_data_with_backend(&a_data, &[2, 2], cuda.clone());
     let b = Tensor::<CudaComplex<f64>, Cuda>::from_data_with_backend(&b_data, &[2, 2], cuda);
 
     // C = A @ I = A
@@ -1486,7 +1489,11 @@ fn test_cuda_einsum_complex_matmul() {
         assert!(
             (r.re() - a.re()).abs() < 1e-10 && (r.im() - a.im()).abs() < 1e-10,
             "Mismatch at {}: got ({}, {}), expected ({}, {})",
-            i, r.re(), r.im(), a.re(), a.im()
+            i,
+            r.re(),
+            r.im(),
+            a.re(),
+            a.im()
         );
     }
 }
@@ -1521,14 +1528,8 @@ fn test_cuda_einsum_complex_trace() {
 fn test_cuda_einsum_complex_inner_product() {
     let cuda = Cuda::new().unwrap();
 
-    let a_data = vec![
-        CudaComplex::new(1.0, 1.0),
-        CudaComplex::new(2.0, -1.0),
-    ];
-    let b_data = vec![
-        CudaComplex::new(1.0, -1.0),
-        CudaComplex::new(0.0, 1.0),
-    ];
+    let a_data = vec![CudaComplex::new(1.0, 1.0), CudaComplex::new(2.0, -1.0)];
+    let b_data = vec![CudaComplex::new(1.0, -1.0), CudaComplex::new(0.0, 1.0)];
 
     let a = Tensor::<CudaComplex<f64>, Cuda>::from_data_with_backend(&a_data, &[2], cuda.clone());
     let b = Tensor::<CudaComplex<f64>, Cuda>::from_data_with_backend(&b_data, &[2], cuda);
@@ -1541,8 +1542,16 @@ fn test_cuda_einsum_complex_inner_product() {
     assert_eq!(inner.shape(), &[] as &[usize]);
     let result = inner.to_vec();
     assert_eq!(result.len(), 1);
-    assert!((result[0].re() - 3.0).abs() < 1e-10, "re = {}", result[0].re());
-    assert!((result[0].im() - 2.0).abs() < 1e-10, "im = {}", result[0].im());
+    assert!(
+        (result[0].re() - 3.0).abs() < 1e-10,
+        "re = {}",
+        result[0].re()
+    );
+    assert!(
+        (result[0].im() - 2.0).abs() < 1e-10,
+        "im = {}",
+        result[0].im()
+    );
 }
 
 /// GPU test: Complex transpose via high-level einsum.
@@ -1577,14 +1586,8 @@ fn test_cuda_einsum_complex_transpose() {
 fn test_cuda_einsum_complex_outer_product() {
     let cuda = Cuda::new().unwrap();
 
-    let a_data = vec![
-        CudaComplex::new(1.0, 1.0),
-        CudaComplex::new(2.0, 0.0),
-    ];
-    let b_data = vec![
-        CudaComplex::new(0.0, 1.0),
-        CudaComplex::new(1.0, -1.0),
-    ];
+    let a_data = vec![CudaComplex::new(1.0, 1.0), CudaComplex::new(2.0, 0.0)];
+    let b_data = vec![CudaComplex::new(0.0, 1.0), CudaComplex::new(1.0, -1.0)];
 
     let a = Tensor::<CudaComplex<f64>, Cuda>::from_data_with_backend(&a_data, &[2], cuda.clone());
     let b = Tensor::<CudaComplex<f64>, Cuda>::from_data_with_backend(&b_data, &[2], cuda);
@@ -1681,11 +1684,8 @@ fn test_cuda_unary_sum_all_2d() {
     let cuda = Cuda::new().unwrap();
 
     // Sum = 1+2+3+4+5+6 = 21
-    let a = Tensor::<f64, Cuda>::from_data_with_backend(
-        &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
-        &[2, 3],
-        cuda,
-    );
+    let a =
+        Tensor::<f64, Cuda>::from_data_with_backend(&[1.0, 2.0, 3.0, 4.0, 5.0, 6.0], &[2, 3], cuda);
 
     let sum = einsum::<Standard<f64>, _, _>(&[&a], &[&[0, 1]], &[]);
 
@@ -1700,11 +1700,8 @@ fn test_cuda_unary_sum_axis_0() {
 
     // Column-major: [[1,3,5],[2,4,6]]
     // Sum over i (rows): [1+2, 3+4, 5+6] = [3, 7, 11]
-    let a = Tensor::<f64, Cuda>::from_data_with_backend(
-        &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
-        &[2, 3],
-        cuda,
-    );
+    let a =
+        Tensor::<f64, Cuda>::from_data_with_backend(&[1.0, 2.0, 3.0, 4.0, 5.0, 6.0], &[2, 3], cuda);
 
     let sum = einsum::<Standard<f64>, _, _>(&[&a], &[&[0, 1]], &[1]);
 
@@ -1719,11 +1716,8 @@ fn test_cuda_unary_sum_axis_1() {
 
     // Column-major: [[1,3,5],[2,4,6]]
     // Sum over j (cols): [1+3+5, 2+4+6] = [9, 12]
-    let a = Tensor::<f64, Cuda>::from_data_with_backend(
-        &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
-        &[2, 3],
-        cuda,
-    );
+    let a =
+        Tensor::<f64, Cuda>::from_data_with_backend(&[1.0, 2.0, 3.0, 4.0, 5.0, 6.0], &[2, 3], cuda);
 
     let sum = einsum::<Standard<f64>, _, _>(&[&a], &[&[0, 1]], &[0]);
 
@@ -1772,11 +1766,8 @@ fn test_cuda_unary_transpose_2x3() {
     // Column-major [2,3]: [[1,3,5],[2,4,6]]
     // Transposed [3,2]: [[1,2],[3,4],[5,6]]
     // In column-major: [1, 3, 5, 2, 4, 6]
-    let a = Tensor::<f64, Cuda>::from_data_with_backend(
-        &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
-        &[2, 3],
-        cuda,
-    );
+    let a =
+        Tensor::<f64, Cuda>::from_data_with_backend(&[1.0, 2.0, 3.0, 4.0, 5.0, 6.0], &[2, 3], cuda);
 
     let transposed = einsum::<Standard<f64>, _, _>(&[&a], &[&[0, 1]], &[1, 0]);
 
@@ -1933,24 +1924,42 @@ const F64_ABS_TOL: f64 = 1e-10;
 
 /// Helper to compare GPU and CPU results for f32
 fn assert_gpu_cpu_equal_f32(gpu: &[f32], cpu: &[f32], tol: f32) {
-    assert_eq!(gpu.len(), cpu.len(), "Length mismatch: GPU={}, CPU={}", gpu.len(), cpu.len());
+    assert_eq!(
+        gpu.len(),
+        cpu.len(),
+        "Length mismatch: GPU={}, CPU={}",
+        gpu.len(),
+        cpu.len()
+    );
     for (i, (g, c)) in gpu.iter().zip(cpu.iter()).enumerate() {
         assert!(
             (g - c).abs() < tol,
             "Mismatch at {}: GPU={}, CPU={}, diff={}",
-            i, g, c, (g - c).abs()
+            i,
+            g,
+            c,
+            (g - c).abs()
         );
     }
 }
 
 /// Helper to compare GPU and CPU results for f64
 fn assert_gpu_cpu_equal_f64(gpu: &[f64], cpu: &[f64], tol: f64) {
-    assert_eq!(gpu.len(), cpu.len(), "Length mismatch: GPU={}, CPU={}", gpu.len(), cpu.len());
+    assert_eq!(
+        gpu.len(),
+        cpu.len(),
+        "Length mismatch: GPU={}, CPU={}",
+        gpu.len(),
+        cpu.len()
+    );
     for (i, (g, c)) in gpu.iter().zip(cpu.iter()).enumerate() {
         assert!(
             (g - c).abs() < tol,
             "Mismatch at {}: GPU={}, CPU={}, diff={}",
-            i, g, c, (g - c).abs()
+            i,
+            g,
+            c,
+            (g - c).abs()
         );
     }
 }
@@ -2009,12 +2018,14 @@ fn test_consistency_batch_matmul() {
     // CPU
     let a_cpu = Tensor::<f64, Cpu>::from_data(&data_a, &[2, 2, 2]);
     let b_cpu = Tensor::<f64, Cpu>::from_data(&data_b, &[2, 2, 2]);
-    let c_cpu = einsum::<Standard<f64>, _, _>(&[&a_cpu, &b_cpu], &[&[0, 1, 2], &[0, 2, 3]], &[0, 1, 3]);
+    let c_cpu =
+        einsum::<Standard<f64>, _, _>(&[&a_cpu, &b_cpu], &[&[0, 1, 2], &[0, 2, 3]], &[0, 1, 3]);
 
     // GPU
     let a_gpu = Tensor::<f64, Cuda>::from_data_with_backend(&data_a, &[2, 2, 2], cuda.clone());
     let b_gpu = Tensor::<f64, Cuda>::from_data_with_backend(&data_b, &[2, 2, 2], cuda);
-    let c_gpu = einsum::<Standard<f64>, _, _>(&[&a_gpu, &b_gpu], &[&[0, 1, 2], &[0, 2, 3]], &[0, 1, 3]);
+    let c_gpu =
+        einsum::<Standard<f64>, _, _>(&[&a_gpu, &b_gpu], &[&[0, 1, 2], &[0, 2, 3]], &[0, 1, 3]);
 
     assert_gpu_cpu_equal_f64(&c_gpu.to_vec(), &c_cpu.to_vec(), F64_ABS_TOL);
 }
@@ -2030,12 +2041,14 @@ fn test_consistency_tensor_contraction_3d() {
     // CPU
     let a_cpu = Tensor::<f64, Cpu>::from_data(&data_a, &[2, 2, 2]);
     let b_cpu = Tensor::<f64, Cpu>::from_data(&data_b, &[2, 2]);
-    let c_cpu = einsum::<Standard<f64>, _, _>(&[&a_cpu, &b_cpu], &[&[0, 1, 2], &[2, 3]], &[0, 1, 3]);
+    let c_cpu =
+        einsum::<Standard<f64>, _, _>(&[&a_cpu, &b_cpu], &[&[0, 1, 2], &[2, 3]], &[0, 1, 3]);
 
     // GPU
     let a_gpu = Tensor::<f64, Cuda>::from_data_with_backend(&data_a, &[2, 2, 2], cuda.clone());
     let b_gpu = Tensor::<f64, Cuda>::from_data_with_backend(&data_b, &[2, 2], cuda);
-    let c_gpu = einsum::<Standard<f64>, _, _>(&[&a_gpu, &b_gpu], &[&[0, 1, 2], &[2, 3]], &[0, 1, 3]);
+    let c_gpu =
+        einsum::<Standard<f64>, _, _>(&[&a_gpu, &b_gpu], &[&[0, 1, 2], &[2, 3]], &[0, 1, 3]);
 
     assert_gpu_cpu_equal_f64(&c_gpu.to_vec(), &c_cpu.to_vec(), F64_ABS_TOL);
 }
@@ -2263,12 +2276,14 @@ fn test_consistency_tensor_network() {
     // CPU - ijk,jkl->il (contract over j and k)
     let a_cpu = Tensor::<f64, Cpu>::from_data(&data_a, &[2, 2, 2]);
     let b_cpu = Tensor::<f64, Cpu>::from_data(&data_b, &[2, 2, 2]);
-    let c_cpu = einsum::<Standard<f64>, _, _>(&[&a_cpu, &b_cpu], &[&[0, 1, 2], &[1, 2, 3]], &[0, 3]);
+    let c_cpu =
+        einsum::<Standard<f64>, _, _>(&[&a_cpu, &b_cpu], &[&[0, 1, 2], &[1, 2, 3]], &[0, 3]);
 
     // GPU
     let a_gpu = Tensor::<f64, Cuda>::from_data_with_backend(&data_a, &[2, 2, 2], cuda.clone());
     let b_gpu = Tensor::<f64, Cuda>::from_data_with_backend(&data_b, &[2, 2, 2], cuda);
-    let c_gpu = einsum::<Standard<f64>, _, _>(&[&a_gpu, &b_gpu], &[&[0, 1, 2], &[1, 2, 3]], &[0, 3]);
+    let c_gpu =
+        einsum::<Standard<f64>, _, _>(&[&a_gpu, &b_gpu], &[&[0, 1, 2], &[1, 2, 3]], &[0, 3]);
 
     assert_gpu_cpu_equal_f64(&c_gpu.to_vec(), &c_cpu.to_vec(), F64_ABS_TOL);
 }
@@ -2703,7 +2718,12 @@ fn test_cuda_backward_3tensor_chain() {
     let d_result = d.to_vec().unwrap();
     // D = 2A
     for (i, &expected) in [2.0, 4.0, 6.0, 8.0].iter().enumerate() {
-        assert!((d_result[i] - expected).abs() < F64_ABS_TOL, "d[{}] = {}", i, d_result[i]);
+        assert!(
+            (d_result[i] - expected).abs() < F64_ABS_TOL,
+            "d[{}] = {}",
+            i,
+            d_result[i]
+        );
     }
 
     // Backward with grad_out = ones
@@ -2752,7 +2772,12 @@ fn test_cuda_backward_3tensor_chain() {
 
     // Since B = I and C = 2I, grad_A = ones @ 2I @ I = 2 * ones
     for (i, &expected) in [2.0, 2.0, 2.0, 2.0].iter().enumerate() {
-        assert!((grad_a_result[i] - expected).abs() < F64_ABS_TOL, "grad_a[{}] = {}", i, grad_a_result[i]);
+        assert!(
+            (grad_a_result[i] - expected).abs() < F64_ABS_TOL,
+            "grad_a[{}] = {}",
+            i,
+            grad_a_result[i]
+        );
     }
 }
 
@@ -2772,11 +2797,8 @@ fn test_cuda_compat_matrix_multiplication() {
         &[2, 3],
         cuda.clone(),
     );
-    let b = Tensor::<f64, Cuda>::from_data_with_backend(
-        &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
-        &[3, 2],
-        cuda,
-    );
+    let b =
+        Tensor::<f64, Cuda>::from_data_with_backend(&[1.0, 2.0, 3.0, 4.0, 5.0, 6.0], &[3, 2], cuda);
 
     let c = einsum::<Standard<f64>, _, _>(&[&a, &b], &[&[0, 1], &[1, 2]], &[0, 2]);
 
@@ -2791,7 +2813,8 @@ fn test_cuda_compat_matrix_multiplication() {
 fn test_cuda_compat_matrix_multiplication_transposed_output() {
     let cuda = Cuda::new().unwrap();
 
-    let a = Tensor::<f64, Cuda>::from_data_with_backend(&[1.0, 2.0, 3.0, 4.0], &[2, 2], cuda.clone());
+    let a =
+        Tensor::<f64, Cuda>::from_data_with_backend(&[1.0, 2.0, 3.0, 4.0], &[2, 2], cuda.clone());
     let b = Tensor::<f64, Cuda>::from_data_with_backend(&[1.0, 2.0, 3.0, 4.0], &[2, 2], cuda);
 
     // ij,jk->ki: contract over j, output transposed
@@ -2805,7 +2828,8 @@ fn test_cuda_compat_matrix_multiplication_transposed_output() {
 fn test_cuda_compat_hadamard_product() {
     let cuda = Cuda::new().unwrap();
 
-    let a = Tensor::<f64, Cuda>::from_data_with_backend(&[1.0, 2.0, 3.0, 4.0], &[2, 2], cuda.clone());
+    let a =
+        Tensor::<f64, Cuda>::from_data_with_backend(&[1.0, 2.0, 3.0, 4.0], &[2, 2], cuda.clone());
     let b = Tensor::<f64, Cuda>::from_data_with_backend(&[5.0, 6.0, 7.0, 8.0], &[2, 2], cuda);
 
     // ij,ij->ij: element-wise multiplication
@@ -2822,11 +2846,8 @@ fn test_cuda_compat_vector_matrix_contraction() {
     let cuda = Cuda::new().unwrap();
 
     let v = Tensor::<f64, Cuda>::from_data_with_backend(&[1.0, 2.0], &[2], cuda.clone());
-    let m = Tensor::<f64, Cuda>::from_data_with_backend(
-        &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
-        &[2, 3],
-        cuda,
-    );
+    let m =
+        Tensor::<f64, Cuda>::from_data_with_backend(&[1.0, 2.0, 3.0, 4.0, 5.0, 6.0], &[2, 3], cuda);
 
     // j,jk->k: vector-matrix product
     let c = einsum::<Standard<f64>, _, _>(&[&v, &m], &[&[0], &[0, 1]], &[1]);
@@ -2886,8 +2907,10 @@ fn test_cuda_compat_batch_matrix_multiplication() {
 fn test_cuda_compat_three_matrix_chain() {
     let cuda = Cuda::new().unwrap();
 
-    let a = Tensor::<f64, Cuda>::from_data_with_backend(&[1.0, 0.0, 0.0, 1.0], &[2, 2], cuda.clone()); // Identity
-    let b = Tensor::<f64, Cuda>::from_data_with_backend(&[1.0, 2.0, 3.0, 4.0], &[2, 2], cuda.clone());
+    let a =
+        Tensor::<f64, Cuda>::from_data_with_backend(&[1.0, 0.0, 0.0, 1.0], &[2, 2], cuda.clone()); // Identity
+    let b =
+        Tensor::<f64, Cuda>::from_data_with_backend(&[1.0, 2.0, 3.0, 4.0], &[2, 2], cuda.clone());
     let c = Tensor::<f64, Cuda>::from_data_with_backend(&[2.0, 0.0, 0.0, 2.0], &[2, 2], cuda); // 2*Identity
 
     // ij,jk,kl->il: chain of three matrices
@@ -2905,8 +2928,10 @@ fn test_cuda_compat_three_matrix_chain() {
 fn test_cuda_compat_star_contraction() {
     let cuda = Cuda::new().unwrap();
 
-    let a = Tensor::<f64, Cuda>::from_data_with_backend(&[1.0, 2.0, 3.0, 4.0], &[2, 2], cuda.clone());
-    let b = Tensor::<f64, Cuda>::from_data_with_backend(&[1.0, 1.0, 1.0, 1.0], &[2, 2], cuda.clone());
+    let a =
+        Tensor::<f64, Cuda>::from_data_with_backend(&[1.0, 2.0, 3.0, 4.0], &[2, 2], cuda.clone());
+    let b =
+        Tensor::<f64, Cuda>::from_data_with_backend(&[1.0, 1.0, 1.0, 1.0], &[2, 2], cuda.clone());
     let c = Tensor::<f64, Cuda>::from_data_with_backend(&[1.0, 0.0, 0.0, 1.0], &[2, 2], cuda);
 
     // ai,bi,ci->abc: contract over i
@@ -2920,8 +2945,10 @@ fn test_cuda_compat_star_contraction() {
 fn test_cuda_compat_tensor_network_contraction() {
     let cuda = Cuda::new().unwrap();
 
-    let a = Tensor::<f64, Cuda>::from_data_with_backend(&[1.0, 2.0, 3.0, 4.0], &[2, 2], cuda.clone());
-    let b = Tensor::<f64, Cuda>::from_data_with_backend(&[1.0, 0.0, 0.0, 1.0], &[2, 2], cuda.clone());
+    let a =
+        Tensor::<f64, Cuda>::from_data_with_backend(&[1.0, 2.0, 3.0, 4.0], &[2, 2], cuda.clone());
+    let b =
+        Tensor::<f64, Cuda>::from_data_with_backend(&[1.0, 0.0, 0.0, 1.0], &[2, 2], cuda.clone());
     let c = Tensor::<f64, Cuda>::from_data_with_backend(&[1.0, 0.0, 0.0, 1.0], &[2, 2], cuda);
 
     // ij,jk,ki->: full contraction to scalar (trace of product)
@@ -2978,10 +3005,12 @@ fn test_cuda_compat_higher_dimensional() {
 fn test_cuda_compat_4d_batch_contraction() {
     let cuda = Cuda::new().unwrap();
 
-    let a = Tensor::<f64, Cuda>::from_data_with_backend(&vec![1.0; 16], &[2, 2, 2, 2], cuda.clone());
+    let a =
+        Tensor::<f64, Cuda>::from_data_with_backend(&vec![1.0; 16], &[2, 2, 2, 2], cuda.clone());
     let b = Tensor::<f64, Cuda>::from_data_with_backend(&vec![1.0; 16], &[2, 2, 2, 2], cuda);
 
-    let c = einsum::<Standard<f64>, _, _>(&[&a, &b], &[&[0, 1, 2, 3], &[0, 1, 3, 4]], &[0, 1, 2, 4]);
+    let c =
+        einsum::<Standard<f64>, _, _>(&[&a, &b], &[&[0, 1, 2, 3], &[0, 1, 3, 4]], &[0, 1, 2, 4]);
 
     assert_eq!(c.shape(), &[2, 2, 2, 2]);
 }
@@ -3008,7 +3037,8 @@ fn test_cuda_core_identity_4d() {
 fn test_cuda_core_matrix_vector() {
     let cuda = Cuda::new().unwrap();
 
-    let a = Tensor::<f64, Cuda>::from_data_with_backend(&[1.0, 2.0, 3.0, 4.0], &[2, 2], cuda.clone());
+    let a =
+        Tensor::<f64, Cuda>::from_data_with_backend(&[1.0, 2.0, 3.0, 4.0], &[2, 2], cuda.clone());
     let v = Tensor::<f64, Cuda>::from_data_with_backend(&[1.0, 1.0], &[2], cuda);
 
     let result = einsum::<Standard<f64>, _, _>(&[&a, &v], &[&[0, 1], &[1]], &[0]);
@@ -3024,7 +3054,8 @@ fn test_cuda_core_matrix_vector() {
 fn test_cuda_core_contract_to_scalar() {
     let cuda = Cuda::new().unwrap();
 
-    let a = Tensor::<f64, Cuda>::from_data_with_backend(&[1.0, 2.0, 3.0, 4.0], &[2, 2], cuda.clone());
+    let a =
+        Tensor::<f64, Cuda>::from_data_with_backend(&[1.0, 2.0, 3.0, 4.0], &[2, 2], cuda.clone());
     let b = Tensor::<f64, Cuda>::from_data_with_backend(&[1.0, 2.0, 3.0, 4.0], &[2, 2], cuda);
 
     let result = einsum::<Standard<f64>, _, _>(&[&a, &b], &[&[0, 1], &[0, 1]], &[]);
@@ -3102,7 +3133,8 @@ fn test_cuda_core_permute_4d() {
 fn test_cuda_core_tensor_contraction_4d_2d() {
     let cuda = Cuda::new().unwrap();
 
-    let t = Tensor::<f64, Cuda>::from_data_with_backend(&vec![1.0; 16], &[2, 2, 2, 2], cuda.clone());
+    let t =
+        Tensor::<f64, Cuda>::from_data_with_backend(&vec![1.0; 16], &[2, 2, 2, 2], cuda.clone());
     let a = Tensor::<f64, Cuda>::from_data_with_backend(&[1.0, 0.0, 0.0, 1.0], &[2, 2], cuda);
 
     let result = einsum::<Standard<f64>, _, _>(&[&t, &a], &[&[0, 1, 2, 3], &[1, 2]], &[0, 3]);
@@ -3115,8 +3147,10 @@ fn test_cuda_core_tensor_contraction_4d_2d() {
 fn test_cuda_core_star_contraction() {
     let cuda = Cuda::new().unwrap();
 
-    let a = Tensor::<f64, Cuda>::from_data_with_backend(&[1.0, 2.0, 3.0, 4.0], &[2, 2], cuda.clone());
-    let b = Tensor::<f64, Cuda>::from_data_with_backend(&[1.0, 1.0, 1.0, 1.0], &[2, 2], cuda.clone());
+    let a =
+        Tensor::<f64, Cuda>::from_data_with_backend(&[1.0, 2.0, 3.0, 4.0], &[2, 2], cuda.clone());
+    let b =
+        Tensor::<f64, Cuda>::from_data_with_backend(&[1.0, 1.0, 1.0, 1.0], &[2, 2], cuda.clone());
     let c = Tensor::<f64, Cuda>::from_data_with_backend(&[1.0, 0.0, 0.0, 1.0], &[2, 2], cuda);
 
     let result = einsum::<Standard<f64>, _, _>(&[&a, &b, &c], &[&[0, 1], &[0, 1], &[0, 1]], &[0]);
@@ -3145,8 +3179,13 @@ fn test_cuda_core_index_sum() {
 fn test_cuda_core_hadamard() {
     let cuda = Cuda::new().unwrap();
 
-    let a = Tensor::<f64, Cuda>::from_data_with_backend(&[1.0, 2.0, 3.0, 4.0, 5.0, 6.0], &[2, 3], cuda.clone());
-    let b = Tensor::<f64, Cuda>::from_data_with_backend(&[2.0, 2.0, 2.0, 2.0, 2.0, 2.0], &[2, 3], cuda);
+    let a = Tensor::<f64, Cuda>::from_data_with_backend(
+        &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
+        &[2, 3],
+        cuda.clone(),
+    );
+    let b =
+        Tensor::<f64, Cuda>::from_data_with_backend(&[2.0, 2.0, 2.0, 2.0, 2.0, 2.0], &[2, 3], cuda);
 
     let result = einsum::<Standard<f64>, _, _>(&[&a, &b], &[&[0, 1], &[0, 1]], &[0, 1]);
 
@@ -3173,7 +3212,8 @@ fn test_cuda_core_project_to_diag() {
 fn test_cuda_core_large_contraction() {
     let cuda = Cuda::new().unwrap();
 
-    let a = Tensor::<f64, Cuda>::from_data_with_backend(&vec![1.0; 1000], &[10, 10, 10], cuda.clone());
+    let a =
+        Tensor::<f64, Cuda>::from_data_with_backend(&vec![1.0; 1000], &[10, 10, 10], cuda.clone());
     let b = Tensor::<f64, Cuda>::from_data_with_backend(&vec![1.0; 1000], &[10, 10, 10], cuda);
 
     let result = einsum::<Standard<f64>, _, _>(&[&a, &b], &[&[0, 1, 2], &[1, 2, 3]], &[0, 3]);
@@ -3190,10 +3230,12 @@ fn test_cuda_core_large_contraction() {
 fn test_cuda_core_tensor_network_cycle() {
     let cuda = Cuda::new().unwrap();
 
-    let a = Tensor::<f64, Cuda>::from_data_with_backend(&vec![1.0; 16], &[2, 2, 2, 2], cuda.clone());
+    let a =
+        Tensor::<f64, Cuda>::from_data_with_backend(&vec![1.0; 16], &[2, 2, 2, 2], cuda.clone());
     let b = Tensor::<f64, Cuda>::from_data_with_backend(&vec![1.0; 16], &[2, 2, 2, 2], cuda);
 
-    let result = einsum::<Standard<f64>, _, _>(&[&a, &b], &[&[0, 1, 2, 3], &[1, 2, 4, 5]], &[0, 3, 4, 5]);
+    let result =
+        einsum::<Standard<f64>, _, _>(&[&a, &b], &[&[0, 1, 2, 3], &[1, 2, 4, 5]], &[0, 3, 4, 5]);
 
     assert_eq!(result.shape(), &[2, 2, 2, 2]);
 }
@@ -3248,7 +3290,8 @@ fn test_cuda_edge_single_element() {
 fn test_cuda_edge_repeated_input_index() {
     let cuda = Cuda::new().unwrap();
 
-    let a = Tensor::<f64, Cuda>::from_data_with_backend(&[1.0, 2.0, 3.0, 4.0], &[2, 2], cuda.clone());
+    let a =
+        Tensor::<f64, Cuda>::from_data_with_backend(&[1.0, 2.0, 3.0, 4.0], &[2, 2], cuda.clone());
     let b = Tensor::<f64, Cuda>::from_data_with_backend(&[5.0, 6.0, 7.0, 8.0], &[2, 2], cuda);
 
     let result = einsum::<Standard<f64>, _, _>(&[&a, &b], &[&[0, 1], &[0, 1]], &[0, 1]);
@@ -3261,8 +3304,10 @@ fn test_cuda_edge_repeated_input_index() {
 fn test_cuda_edge_all_contracted() {
     let cuda = Cuda::new().unwrap();
 
-    let a = Tensor::<f64, Cuda>::from_data_with_backend(&[1.0, 2.0, 3.0, 4.0], &[2, 2], cuda.clone());
-    let b = Tensor::<f64, Cuda>::from_data_with_backend(&[1.0, 0.0, 0.0, 1.0], &[2, 2], cuda.clone());
+    let a =
+        Tensor::<f64, Cuda>::from_data_with_backend(&[1.0, 2.0, 3.0, 4.0], &[2, 2], cuda.clone());
+    let b =
+        Tensor::<f64, Cuda>::from_data_with_backend(&[1.0, 0.0, 0.0, 1.0], &[2, 2], cuda.clone());
     let c = Tensor::<f64, Cuda>::from_data_with_backend(&[1.0, 0.0, 0.0, 1.0], &[2, 2], cuda);
 
     // ij,jk,ki-> (full contraction)
@@ -3299,7 +3344,10 @@ fn test_cuda_error_invalid_ordinal() {
     let result = Cuda::on_device(999);
 
     // Should error, not panic
-    assert!(result.is_err(), "Expected error for invalid device ordinal 999");
+    assert!(
+        result.is_err(),
+        "Expected error for invalid device ordinal 999"
+    );
 }
 
 /// GPU test: Verify that Cuda::new() succeeds on valid system or fails gracefully.

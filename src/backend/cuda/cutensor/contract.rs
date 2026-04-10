@@ -96,7 +96,6 @@ impl PlanCache {
         }
         Ok(self.cache.get(&key).unwrap())
     }
-
 }
 
 /// Execute a tensor contraction using a pre-compiled plan.

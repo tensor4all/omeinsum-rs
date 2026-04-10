@@ -437,10 +437,7 @@ impl<T: Scalar, B: Backend> Tensor<T, B> {
     /// let result = t.sum_axis::<Standard<f32>>(1);
     /// assert_eq!(result.to_vec(), vec![4.0, 6.0]);
     /// ```
-    pub fn sum_axis<A: Algebra<Scalar = T>>(&self, axis: usize) -> Self
-    where
-        B: Default,
-    {
+    pub fn sum_axis<A: Algebra<Scalar = T>>(&self, axis: usize) -> Self {
         assert!(
             axis < self.ndim(),
             "Axis {} out of bounds for {}D tensor",
@@ -454,7 +451,7 @@ impl<T: Scalar, B: Backend> Tensor<T, B> {
         // Handle reduction to scalar
         if new_shape.is_empty() {
             let sum = self.sum::<A>();
-            return Self::from_data(&[sum], &[1]);
+            return Self::from_data_with_backend(&[sum], &[], self.backend.clone());
         }
 
         let data = self.to_vec();
@@ -493,7 +490,7 @@ impl<T: Scalar, B: Backend> Tensor<T, B> {
         }
 
         let result_data: Vec<T> = result.into_iter().map(|v| v.to_scalar()).collect();
-        Self::from_data(&result_data, &new_shape)
+        Self::from_data_with_backend(&result_data, &new_shape, self.backend.clone())
     }
 
     /// Extract diagonal elements from a 2D tensor.
@@ -511,10 +508,7 @@ impl<T: Scalar, B: Backend> Tensor<T, B> {
     /// let diag = t.diagonal();
     /// assert_eq!(diag.to_vec(), vec![1.0, 4.0]);
     /// ```
-    pub fn diagonal(&self) -> Self
-    where
-        B: Default,
-    {
+    pub fn diagonal(&self) -> Self {
         assert_eq!(
             self.ndim(),
             2,
@@ -531,7 +525,7 @@ impl<T: Scalar, B: Backend> Tensor<T, B> {
         let data = self.to_vec();
         let diag: Vec<T> = (0..n).map(|i| data[i * n + i]).collect();
 
-        Self::from_data(&diag, &[n])
+        Self::from_data_with_backend(&diag, &[n], self.backend.clone())
     }
 }
 
@@ -652,6 +646,50 @@ mod tests {
         let sum_rows = t.sum_axis::<Standard<f32>>(0);
         assert_eq!(sum_rows.shape(), &[2]);
         assert_eq!(sum_rows.to_vec(), vec![3.0, 7.0]);
+    }
+
+    #[test]
+    fn test_sum_axis_1d_reduces_to_scalar_shape() {
+        use crate::algebra::Standard;
+
+        let t = Tensor::<f32, Cpu>::from_data(&[1.0, 2.0, 3.0], &[3]);
+        let reduced = t.sum_axis::<Standard<f32>>(0);
+
+        assert_eq!(reduced.shape(), &[] as &[usize]);
+        assert_eq!(reduced.to_vec(), vec![6.0]);
+    }
+
+    #[test]
+    fn test_sum_axis_preserves_explicit_backend() {
+        use crate::algebra::Standard;
+        use crate::test_support::TestBackend;
+
+        let backend = TestBackend::new(13);
+        let t = Tensor::<f32, TestBackend>::from_data_with_backend(
+            &[1.0, 2.0, 3.0, 4.0],
+            &[2, 2],
+            backend.clone(),
+        );
+
+        let reduced = t.sum_axis::<Standard<f32>>(1);
+        assert_eq!(reduced.to_vec(), vec![4.0, 6.0]);
+        assert_eq!(reduced.backend(), &backend);
+    }
+
+    #[test]
+    fn test_diagonal_preserves_explicit_backend() {
+        use crate::test_support::TestBackend;
+
+        let backend = TestBackend::new(17);
+        let t = Tensor::<f32, TestBackend>::from_data_with_backend(
+            &[1.0, 2.0, 3.0, 4.0],
+            &[2, 2],
+            backend.clone(),
+        );
+
+        let diag = t.diagonal();
+        assert_eq!(diag.to_vec(), vec![1.0, 4.0]);
+        assert_eq!(diag.backend(), &backend);
     }
 
     #[test]

@@ -840,10 +840,7 @@ fn test_tropical_3d_max_gradient() {
     use omeinsum::MaxPlus;
 
     // Shape [2, 2, 2] = 8 elements
-    let a = Tensor::<f64, Cpu>::from_data(
-        &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0],
-        &[2, 2, 2],
-    );
+    let a = Tensor::<f64, Cpu>::from_data(&[1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0], &[2, 2, 2]);
     // In col-major, max for i=0 is at some position, max for i=1 is at some position
 
     let (c, grad_fn) = einsum_with_grad::<MaxPlus<f64>, _, _>(&[&a], &[&[0, 1, 2]], &[0]);

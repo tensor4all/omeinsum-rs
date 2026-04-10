@@ -158,7 +158,8 @@ fn test_maxplus_viterbi_example() {
     let initial = Tensor::<f32, Cpu>::from_data(&[0.0, -1.0], &[2, 1]);
 
     // After one step: max over starting state
-    let after_one = transitions.contract_binary::<MaxPlus<f32>>(&initial, &[0, 1], &[1, 2], &[0, 2]);
+    let after_one =
+        transitions.contract_binary::<MaxPlus<f32>>(&initial, &[0, 1], &[1, 2], &[0, 2]);
 
     // state 0: max(-1+0, -2+(-1)) = max(-1, -3) = -1
     // state 1: max(-3+0, -1+(-1)) = max(-3, -2) = -2
