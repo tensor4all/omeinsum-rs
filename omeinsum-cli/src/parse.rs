@@ -55,16 +55,16 @@ pub fn parse_flat(expr: &str) -> Result<ParsedEinsum, String> {
         ixs.push(labels);
     }
 
-    let input_label_set: std::collections::HashSet<usize> =
-        ixs.iter().flat_map(|labels| labels.iter().copied()).collect();
+    let input_label_set: std::collections::HashSet<usize> = ixs
+        .iter()
+        .flat_map(|labels| labels.iter().copied())
+        .collect();
 
     let mut iy = Vec::new();
     for ch in output_side.trim().chars() {
         let idx = get_or_insert(ch)?;
         if !input_label_set.contains(&idx) {
-            return Err(format!(
-                "Output label '{ch}' not found in any input tensor"
-            ));
+            return Err(format!("Output label '{ch}' not found in any input tensor"));
         }
         iy.push(idx);
     }
@@ -130,7 +130,13 @@ pub fn parse_parenthesized(expr: &str) -> Result<ParsedTree, String> {
     let mut pos = 0usize;
     let mut leaf_counter = 0usize;
     let mut all_ixs = Vec::new();
-    let raw = parse_expr(&chars, &mut pos, &label_map, &mut leaf_counter, &mut all_ixs)?;
+    let raw = parse_expr(
+        &chars,
+        &mut pos,
+        &label_map,
+        &mut leaf_counter,
+        &mut all_ixs,
+    )?;
     skip_spaces(&chars, &mut pos);
     if pos != chars.len() {
         return Err(format!(
@@ -139,8 +145,10 @@ pub fn parse_parenthesized(expr: &str) -> Result<ParsedTree, String> {
         ));
     }
 
-    let input_label_set: std::collections::HashSet<usize> =
-        all_ixs.iter().flat_map(|labels| labels.iter().copied()).collect();
+    let input_label_set: std::collections::HashSet<usize> = all_ixs
+        .iter()
+        .flat_map(|labels| labels.iter().copied())
+        .collect();
     for &idx in &iy {
         if !input_label_set.contains(&idx) {
             let ch = label_map
@@ -165,6 +173,8 @@ enum RawTree {
     Leaf(usize),
     Node(Vec<RawTree>),
 }
+
+type BuiltTree = (NestedEinsum<usize>, Vec<usize>, Vec<usize>);
 
 fn parse_expr(
     chars: &[char],
@@ -258,7 +268,7 @@ fn assign_subtree_iy(
     raw: RawTree,
     all_ixs: &[Vec<usize>],
     global_iy: &[usize],
-) -> Result<(NestedEinsum<usize>, Vec<usize>, Vec<usize>), String> {
+) -> Result<BuiltTree, String> {
     match raw {
         RawTree::Leaf(idx) => Ok((NestedEinsum::leaf(idx), all_ixs[idx].clone(), vec![idx])),
         RawTree::Node(children) => {
@@ -384,10 +394,7 @@ mod tests {
             NestedEinsum::Node { args, .. } => {
                 assert_eq!(args.len(), 2);
                 assert!(matches!(&args[0], NestedEinsum::Node { .. }));
-                assert!(matches!(
-                    &args[1],
-                    NestedEinsum::Leaf { tensor_index: 2 }
-                ));
+                assert!(matches!(&args[1], NestedEinsum::Leaf { tensor_index: 2 }));
             }
             _ => panic!("Expected Node at root"),
         }
@@ -399,14 +406,8 @@ mod tests {
         match &result.tree {
             NestedEinsum::Node { args, .. } => {
                 assert_eq!(args.len(), 2);
-                assert!(matches!(
-                    &args[0],
-                    NestedEinsum::Leaf { tensor_index: 0 }
-                ));
-                assert!(matches!(
-                    &args[1],
-                    NestedEinsum::Leaf { tensor_index: 1 }
-                ));
+                assert!(matches!(&args[0], NestedEinsum::Leaf { tensor_index: 0 }));
+                assert!(matches!(&args[1], NestedEinsum::Leaf { tensor_index: 1 }));
             }
             _ => panic!("Expected Node at root"),
         }

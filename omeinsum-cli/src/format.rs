@@ -4,17 +4,12 @@ use omeco::NestedEinsum;
 use serde::{Deserialize, Serialize};
 
 /// Storage order for tensor data in JSON.
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum StorageOrder {
+    #[default]
     ColMajor,
     RowMajor,
-}
-
-impl Default for StorageOrder {
-    fn default() -> Self {
-        Self::ColMajor
-    }
 }
 
 /// Scalar data type identifier.

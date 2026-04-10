@@ -38,7 +38,14 @@ fn test_optimize_to_file() {
     let out_path = out.path().to_str().unwrap().to_string();
 
     cmd()
-        .args(["optimize", "ij,jk->ik", "--sizes", "i=2,j=3,k=4", "-o", &out_path])
+        .args([
+            "optimize",
+            "ij,jk->ik",
+            "--sizes",
+            "i=2,j=3,k=4",
+            "-o",
+            &out_path,
+        ])
         .assert()
         .success();
 
@@ -205,7 +212,14 @@ fn test_optimize_then_contract_pipeline() {
     let topo_path = topo_file.path().to_str().unwrap().to_string();
 
     cmd()
-        .args(["optimize", "ij,jk->ik", "--sizes", "i=2,j=2,k=2", "-o", &topo_path])
+        .args([
+            "optimize",
+            "ij,jk->ik",
+            "--sizes",
+            "i=2,j=2,k=2",
+            "-o",
+            &topo_path,
+        ])
         .assert()
         .success();
 
@@ -366,7 +380,12 @@ fn test_contract_shape_mismatch() {
     );
 
     cmd()
-        .args(["contract", "--expr", "ij->ij", tensors.path().to_str().unwrap()])
+        .args([
+            "contract",
+            "--expr",
+            "ij->ij",
+            tensors.path().to_str().unwrap(),
+        ])
         .assert()
         .failure()
         .stderr(contains("doesn't match shape"));

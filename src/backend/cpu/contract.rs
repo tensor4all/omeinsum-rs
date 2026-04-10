@@ -120,14 +120,14 @@ where
     let new_strides = compute_contiguous_strides(&new_shape);
     let old_size = shape.iter().product::<usize>().max(1);
 
-    for old_linear in 0..old_size {
+    for (old_linear, scalar) in data.iter().copied().enumerate().take(old_size) {
         // Compute old multi-index (column-major)
         let mut remaining = old_linear;
         let mut new_linear = 0usize;
         let mut new_dim = 0usize;
-        for i in 0..shape.len() {
-            let coord = remaining % shape[i];
-            remaining /= shape[i];
+        for (i, dim_size) in shape.iter().copied().enumerate() {
+            let coord = remaining % dim_size;
+            remaining /= dim_size;
             if !trace_positions.contains(&i) {
                 new_linear += coord * new_strides[new_dim];
                 new_dim += 1;
@@ -135,7 +135,7 @@ where
         }
 
         let acc = A::from_scalar(result[new_linear]);
-        let val = A::from_scalar(data[old_linear]);
+        let val = A::from_scalar(scalar);
         result[new_linear] = acc.add(val).to_scalar();
     }
 
@@ -171,8 +171,16 @@ where
     //    GEMM can only contract modes shared by both inputs. Single-input modes
     //    not in the output must be summed over (traced) before GEMM.
     let c_set: HashSet<i32> = modes_c.iter().copied().collect();
-    let left_trace: Vec<i32> = left.iter().filter(|m| !c_set.contains(m)).copied().collect();
-    let right_trace: Vec<i32> = right.iter().filter(|m| !c_set.contains(m)).copied().collect();
+    let left_trace: Vec<i32> = left
+        .iter()
+        .filter(|m| !c_set.contains(m))
+        .copied()
+        .collect();
+    let right_trace: Vec<i32> = right
+        .iter()
+        .filter(|m| !c_set.contains(m))
+        .copied()
+        .collect();
 
     let (a_data, a_shape, a_modes) = if !left_trace.is_empty() {
         reduce_trace_modes::<A>(&a_contig, shape_a, modes_a, &left_trace)
@@ -187,7 +195,11 @@ where
 
     // Free modes (left/right modes that ARE in the output)
     let left_free: Vec<i32> = left.iter().filter(|m| c_set.contains(m)).copied().collect();
-    let right_free: Vec<i32> = right.iter().filter(|m| c_set.contains(m)).copied().collect();
+    let right_free: Vec<i32> = right
+        .iter()
+        .filter(|m| c_set.contains(m))
+        .copied()
+        .collect();
 
     // 4. Compute dimension sizes (using reduced inputs)
     let batch_size = product_of_dims(&batch, &a_modes, &a_shape);
@@ -341,8 +353,16 @@ where
 
     // Handle trace modes (same as contract)
     let c_set: HashSet<i32> = modes_c.iter().copied().collect();
-    let left_trace: Vec<i32> = left.iter().filter(|m| !c_set.contains(m)).copied().collect();
-    let right_trace: Vec<i32> = right.iter().filter(|m| !c_set.contains(m)).copied().collect();
+    let left_trace: Vec<i32> = left
+        .iter()
+        .filter(|m| !c_set.contains(m))
+        .copied()
+        .collect();
+    let right_trace: Vec<i32> = right
+        .iter()
+        .filter(|m| !c_set.contains(m))
+        .copied()
+        .collect();
 
     let (a_data, a_shape, a_modes) = if !left_trace.is_empty() {
         reduce_trace_modes::<A>(&a_contig, shape_a, modes_a, &left_trace)
@@ -356,7 +376,11 @@ where
     };
 
     let left_free: Vec<i32> = left.iter().filter(|m| c_set.contains(m)).copied().collect();
-    let right_free: Vec<i32> = right.iter().filter(|m| c_set.contains(m)).copied().collect();
+    let right_free: Vec<i32> = right
+        .iter()
+        .filter(|m| c_set.contains(m))
+        .copied()
+        .collect();
 
     let batch_size = product_of_dims(&batch, &a_modes, &a_shape);
     let left_size = product_of_dims(&left_free, &a_modes, &a_shape);

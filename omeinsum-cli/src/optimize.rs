@@ -63,8 +63,9 @@ pub fn run(
     .map_err(|err| format!("JSON serialization failed: {err}"))?;
 
     match output {
-        Some(path) => std::fs::write(path, &json)
-            .map_err(|err| format!("Failed to write '{path}': {err}"))?,
+        Some(path) => {
+            std::fs::write(path, &json).map_err(|err| format!("Failed to write '{path}': {err}"))?
+        }
         None => {
             let stdout = io::stdout();
             let mut handle = stdout.lock();
@@ -120,8 +121,7 @@ mod tests {
 
     #[test]
     fn test_parse_sizes() {
-        let label_map: HashMap<char, usize> =
-            [('i', 0), ('j', 1), ('k', 2)].into_iter().collect();
+        let label_map: HashMap<char, usize> = [('i', 0), ('j', 1), ('k', 2)].into_iter().collect();
         let sizes = parse_sizes("i=2,j=3,k=4", &label_map).unwrap();
         assert_eq!(sizes[&0], 2);
         assert_eq!(sizes[&1], 3);

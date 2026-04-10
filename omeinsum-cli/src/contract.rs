@@ -7,8 +7,7 @@ use omeinsum::algebra::Standard;
 use omeinsum::{Algebra, BackendScalar, Cpu, Einsum, Tensor};
 
 use crate::format::{
-    col_to_row_major, row_to_col_major, Dtype, ResultFile, StorageOrder, TensorsFile,
-    TopologyFile,
+    col_to_row_major, row_to_col_major, Dtype, ResultFile, StorageOrder, TensorsFile, TopologyFile,
 };
 use crate::parse::{parse_flat, parse_parenthesized};
 
@@ -397,13 +396,13 @@ fn write_output(
     .map_err(|err| format!("JSON serialization failed: {err}"))?;
 
     match output {
-        Some(path) => std::fs::write(path, &json)
-            .map_err(|err| format!("Failed to write '{path}': {err}"))?,
+        Some(path) => {
+            std::fs::write(path, &json).map_err(|err| format!("Failed to write '{path}': {err}"))?
+        }
         None => {
             let stdout = io::stdout();
             let mut handle = stdout.lock();
-            writeln!(handle, "{json}")
-                .map_err(|err| format!("Failed to write stdout: {err}"))?;
+            writeln!(handle, "{json}").map_err(|err| format!("Failed to write stdout: {err}"))?;
         }
     }
 
