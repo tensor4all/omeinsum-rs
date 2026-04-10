@@ -128,6 +128,38 @@ fn test_backward_matmul_ones() {
     assert_eq!(grads[1].to_vec(), vec![3.0, 7.0, 3.0, 7.0]);
 }
 
+#[test]
+fn test_backward_three_tensor_scalar_cycle_standard() {
+    // A, B, C are diagonal matrices:
+    // A = diag(2, 3), B = diag(5, 7), C = diag(11, 13)
+    // einsum "ij,jk,ki->" = sum_i A[i,i] * B[i,i] * C[i,i]
+    // = 2*5*11 + 3*7*13 = 383
+    let a = Tensor::<f64, Cpu>::from_data(&[2.0, 0.0, 0.0, 3.0], &[2, 2]);
+    let b = Tensor::<f64, Cpu>::from_data(&[5.0, 0.0, 0.0, 7.0], &[2, 2]);
+    let c = Tensor::<f64, Cpu>::from_data(&[11.0, 0.0, 0.0, 13.0], &[2, 2]);
+
+    let (result, grad_fn) =
+        einsum_with_grad::<Standard<f64>, _, _>(&[&a, &b, &c], &[&[0, 1], &[1, 2], &[2, 0]], &[]);
+
+    assert_eq!(result.shape(), &[] as &[usize]);
+    assert_eq!(result.to_vec(), vec![383.0]);
+
+    let grad_out = Tensor::<f64, Cpu>::from_data(&[1.0], &[]);
+    let grads = grad_fn.backward::<Standard<f64>>(&grad_out, &[&a, &b, &c]);
+
+    assert_eq!(grads.len(), 3);
+    assert_eq!(grads[0].shape(), &[2, 2]);
+    assert_eq!(grads[1].shape(), &[2, 2]);
+    assert_eq!(grads[2].shape(), &[2, 2]);
+
+    // d/dA = diag(B .* C) = diag(55, 91)
+    assert_eq!(grads[0].to_vec(), vec![55.0, 0.0, 0.0, 91.0]);
+    // d/dB = diag(A .* C) = diag(22, 39)
+    assert_eq!(grads[1].to_vec(), vec![22.0, 0.0, 0.0, 39.0]);
+    // d/dC = diag(A .* B) = diag(10, 21)
+    assert_eq!(grads[2].to_vec(), vec![10.0, 0.0, 0.0, 21.0]);
+}
+
 // ============================================================================
 // Tropical algebra backward tests (require tropical feature)
 // ============================================================================

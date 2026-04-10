@@ -18,7 +18,9 @@ use crate::backend::{Backend, BackendScalar, Storage};
 use crate::tensor::Tensor;
 use std::collections::HashMap;
 
-use super::engine::{execute_unary_naive, normalize_binary_operand};
+use super::engine::{
+    compute_normalized_binary_indices, execute_unary_naive, execute_unary_with_argmax,
+};
 
 /// Compute gradient for a unary einsum operation.
 ///
@@ -277,224 +279,335 @@ where
 }
 
 // ============================================================================
-// CacheTree and cost_and_gradient implementation
+// Executed-tape gradient implementation
 // ============================================================================
-//
-// Port of Julia OMEinsum's bp.jl for computing gradients efficiently.
-// The key insight is to cache intermediate contraction results during forward
-// pass and reuse them during backward pass.
 
 use omeco::NestedEinsum;
 
 use crate::einsum::Einsum;
 
-/// Cache tree for storing intermediate contraction results.
-///
-/// Isomorphic to the contraction tree structure from `NestedEinsum`.
-/// Each node stores the tensor computed at that step, plus optional
-/// argmax for tropical algebras.
-///
-/// # Example
-///
-/// For a contraction `(A @ B) @ C`:
-/// ```text
-/// CacheTree {
-///     content: result of (A @ B) @ C
-///     argmax: Some(...) if tropical
-///     siblings: [
-///         CacheTree { content: result of A @ B, siblings: [A_cache, B_cache] },
-///         CacheTree { content: C, siblings: [] }
-///     ]
-/// }
-/// ```
-pub struct CacheTree<T: Scalar, B: Backend> {
-    /// The cached tensor result at this node
-    pub content: Tensor<T, B>,
-    /// Argmax tensor for tropical algebras (optional)
-    pub argmax: Option<Tensor<u32, B>>,
-    /// Child cache trees (called "siblings" in Julia for tree siblings)
-    pub siblings: Vec<CacheTree<T, B>>,
+#[derive(Clone)]
+enum TapeOp {
+    Leaf {
+        tensor_index: usize,
+    },
+    Unary {
+        input_ix: Vec<usize>,
+        output_ix: Vec<usize>,
+    },
+    Binary {
+        left_ix: Vec<usize>,
+        right_ix: Vec<usize>,
+        output_ix: Vec<usize>,
+    },
 }
 
-impl<T: Scalar, B: Backend> CacheTree<T, B> {
-    /// Create a leaf cache (for input tensors).
-    pub fn leaf(tensor: Tensor<T, B>) -> Self {
-        CacheTree {
+#[derive(Clone)]
+struct TapeNode<T: Scalar, B: Backend> {
+    content: Tensor<T, B>,
+    argmax: Option<Tensor<u32, B>>,
+    op: TapeOp,
+    children: Vec<TapeNode<T, B>>,
+}
+
+impl<T: Scalar, B: Backend> TapeNode<T, B> {
+    fn leaf(tensor_index: usize, tensor: Tensor<T, B>) -> Self {
+        Self {
             content: tensor,
             argmax: None,
-            siblings: Vec::new(),
+            op: TapeOp::Leaf { tensor_index },
+            children: Vec::new(),
         }
     }
 
-    /// Create an internal node cache.
-    pub fn node(
+    fn unary(
+        input_ix: Vec<usize>,
+        output_ix: Vec<usize>,
         content: Tensor<T, B>,
         argmax: Option<Tensor<u32, B>>,
-        siblings: Vec<Self>,
+        child: Self,
     ) -> Self {
-        CacheTree {
+        Self {
             content,
             argmax,
-            siblings,
+            op: TapeOp::Unary {
+                input_ix,
+                output_ix,
+            },
+            children: vec![child],
+        }
+    }
+
+    fn binary(
+        left_ix: Vec<usize>,
+        right_ix: Vec<usize>,
+        output_ix: Vec<usize>,
+        content: Tensor<T, B>,
+        argmax: Option<Tensor<u32, B>>,
+        left: Self,
+        right: Self,
+    ) -> Self {
+        Self {
+            content,
+            argmax,
+            op: TapeOp::Binary {
+                left_ix,
+                right_ix,
+                output_ix,
+            },
+            children: vec![left, right],
         }
     }
 }
 
-/// Compute einsum with caching for backward pass.
-///
-/// Recursively contracts tensors following the contraction tree,
-/// caching intermediate results for gradient computation.
-///
-/// # Arguments
-///
-/// * `code` - The contraction tree from optimization
-/// * `tensors` - Input tensors
-/// * `size_dict` - Dimension sizes
-///
-/// # Returns
-///
-/// CacheTree containing all intermediate results.
-#[allow(clippy::only_used_in_recursion)]
-pub fn cached_einsum<A, T, B>(
-    code: &NestedEinsum<usize>,
+#[derive(Clone)]
+pub(crate) struct GradientTape<T: Scalar, B: Backend> {
+    root: TapeNode<T, B>,
+    size_dict: HashMap<usize, usize>,
+    input_shapes: Vec<Vec<usize>>,
+}
+
+impl<T: Scalar, B: Backend> GradientTape<T, B> {
+    pub(crate) fn result(&self) -> Tensor<T, B> {
+        self.root.content.clone()
+    }
+
+    pub(crate) fn num_inputs(&self) -> usize {
+        self.input_shapes.len()
+    }
+
+    pub(crate) fn input_shapes(&self) -> &[Vec<usize>] {
+        &self.input_shapes
+    }
+
+    pub(crate) fn backward<A>(&self, dy: &Tensor<T, B>) -> Vec<Tensor<T, B>>
+    where
+        A: Algebra<Scalar = T, Index = u32>,
+        T: BackendScalar<B>,
+    {
+        let mut grads: Vec<Option<Tensor<T, B>>> = vec![None; self.input_shapes.len()];
+        backprop_tape_node::<A, T, B>(&self.root, dy, &self.size_dict, &mut grads);
+        grads.into_iter().map(|grad| grad.unwrap()).collect()
+    }
+}
+
+pub(crate) fn build_gradient_tape<A, T, B>(
+    code: &Einsum<usize>,
     tensors: &[&Tensor<T, B>],
-    size_dict: &HashMap<usize, usize>,
-) -> CacheTree<T, B>
+) -> GradientTape<T, B>
 where
     A: Algebra<Scalar = T, Index = u32>,
     T: Scalar + BackendScalar<B>,
     B: Backend,
 {
-    match code {
-        NestedEinsum::Leaf { tensor_index } => {
-            // For leaf nodes, just cache the input tensor
-            CacheTree::leaf(tensors[*tensor_index].clone())
-        }
-        NestedEinsum::Node { args, eins } => {
-            // Recursively cache children
-            let children: Vec<CacheTree<T, B>> = args
-                .iter()
-                .map(|arg| cached_einsum::<A, T, B>(arg, tensors, size_dict))
-                .collect();
+    let tree = code
+        .contraction_tree()
+        .expect("build_gradient_tape requires optimized Einsum. Call optimize_greedy() first.");
+    let (root, root_ix) = build_tape_node_from_tree::<A, T, B>(tree, code, tensors);
+    let root = finalize_tape_node::<A, T, B>(root, &root_ix, &code.iy, &code.size_dict);
 
-            // Contract the children's results
+    GradientTape {
+        root,
+        size_dict: code.size_dict.clone(),
+        input_shapes: tensors
+            .iter()
+            .map(|tensor| tensor.shape().to_vec())
+            .collect(),
+    }
+}
+
+#[allow(clippy::only_used_in_recursion)]
+fn build_tape_node_from_tree<A, T, B>(
+    tree: &NestedEinsum<usize>,
+    code: &Einsum<usize>,
+    tensors: &[&Tensor<T, B>],
+) -> (TapeNode<T, B>, Vec<usize>)
+where
+    A: Algebra<Scalar = T, Index = u32>,
+    T: Scalar + BackendScalar<B>,
+    B: Backend,
+{
+    match tree {
+        NestedEinsum::Leaf { tensor_index } => (
+            TapeNode::leaf(*tensor_index, tensors[*tensor_index].clone()),
+            code.ixs[*tensor_index].clone(),
+        ),
+        NestedEinsum::Node { args, eins } => {
             assert_eq!(args.len(), 2, "Expected binary contraction tree");
 
-            let left = &children[0].content;
-            let right = &children[1].content;
-            let ia = &eins.ixs[0];
-            let ib = &eins.ixs[1];
-            let iy = &eins.iy;
-            let (left, ia) = normalize_binary_operand::<A, T, B>(left, ia, ib, iy, size_dict);
-            let (right, ib) =
-                normalize_binary_operand::<A, T, B>(right, ib, ia.as_slice(), iy, size_dict);
+            let (left, left_ix) = build_tape_node_from_tree::<A, T, B>(&args[0], code, tensors);
+            let (right, right_ix) = build_tape_node_from_tree::<A, T, B>(&args[1], code, tensors);
 
-            let (result, argmax) = if A::needs_argmax() {
-                let (r, am) = left.contract_binary_with_argmax::<A>(&right, &ia, &ib, iy);
-                (r, Some(am))
+            let (left, left_ix) = normalize_tape_operand::<A, T, B>(
+                left,
+                &left_ix,
+                &right_ix,
+                &eins.iy,
+                &code.size_dict,
+            );
+            let (right, right_ix) = normalize_tape_operand::<A, T, B>(
+                right,
+                &right_ix,
+                &left_ix,
+                &eins.iy,
+                &code.size_dict,
+            );
+
+            let (content, argmax) = if A::needs_argmax() {
+                let (content, argmax) = left.content.contract_binary_with_argmax::<A>(
+                    &right.content,
+                    &left_ix,
+                    &right_ix,
+                    &eins.iy,
+                );
+                (content, Some(argmax))
             } else {
-                (left.contract_binary::<A>(&right, &ia, &ib, iy), None)
+                (
+                    left.content.contract_binary::<A>(
+                        &right.content,
+                        &left_ix,
+                        &right_ix,
+                        &eins.iy,
+                    ),
+                    None,
+                )
             };
 
-            CacheTree::node(result, argmax, children)
+            (
+                TapeNode::binary(
+                    left_ix,
+                    right_ix,
+                    eins.iy.clone(),
+                    content,
+                    argmax,
+                    left,
+                    right,
+                ),
+                eins.iy.clone(),
+            )
         }
     }
 }
 
-/// Back-propagate gradients through the cache tree.
-///
-/// Given a gradient on the output, propagates it backward through the tree,
-/// computing gradients for all intermediate nodes.
-///
-/// # Arguments
-///
-/// * `code` - The contraction tree
-/// * `cache` - Cached forward results
-/// * `dy` - Gradient on the output
-/// * `size_dict` - Dimension sizes
-///
-/// # Returns
-///
-/// CacheTree where each node's `content` is the gradient at that position.
-#[allow(clippy::only_used_in_recursion)]
-pub fn back_propagate<A, T, B>(
-    code: &NestedEinsum<usize>,
-    cache: &CacheTree<T, B>,
-    dy: &Tensor<T, B>,
+fn normalize_tape_operand<A, T, B>(
+    node: TapeNode<T, B>,
+    ix: &[usize],
+    other: &[usize],
+    output: &[usize],
     size_dict: &HashMap<usize, usize>,
-) -> CacheTree<T, B>
+) -> (TapeNode<T, B>, Vec<usize>)
 where
     A: Algebra<Scalar = T, Index = u32>,
     T: Scalar + BackendScalar<B>,
     B: Backend,
 {
-    match code {
-        NestedEinsum::Leaf { .. } => {
-            // For leaves, the gradient is just dy
-            CacheTree::leaf(dy.clone())
-        }
-        NestedEinsum::Node { args, eins } => {
-            assert_eq!(args.len(), 2, "Expected binary contraction tree");
-
-            // Get cached forward values
-            let left = &cache.siblings[0].content;
-            let right = &cache.siblings[1].content;
-            let argmax = cache.argmax.as_ref();
-
-            let ia = &eins.ixs[0];
-            let ib = &eins.ixs[1];
-            let iy = &eins.iy;
-
-            // Compute gradients for left and right children
-            let (grad_left, grad_right) =
-                contract_binary_backward::<A, T, B>(dy, left, right, argmax, ia, ib, iy);
-
-            // Recursively back-propagate through children
-            let child_grads: Vec<CacheTree<T, B>> = vec![
-                back_propagate::<A, T, B>(&args[0], &cache.siblings[0], &grad_left, size_dict),
-                back_propagate::<A, T, B>(&args[1], &cache.siblings[1], &grad_right, size_dict),
-            ];
-
-            CacheTree::node(dy.clone(), None, child_grads)
-        }
+    let normalized_ix = compute_normalized_binary_indices(ix, other, output);
+    if normalized_ix == ix {
+        (node, normalized_ix)
+    } else {
+        let (content, argmax) = if A::needs_argmax() {
+            let (content, argmax) =
+                execute_unary_with_argmax::<A, T, B>(&node.content, ix, &normalized_ix, size_dict);
+            (content, Some(argmax))
+        } else {
+            (
+                execute_unary_naive::<A, T, B>(&node.content, ix, &normalized_ix, size_dict),
+                None,
+            )
+        };
+        (
+            TapeNode::unary(ix.to_vec(), normalized_ix.clone(), content, argmax, node),
+            normalized_ix,
+        )
     }
 }
 
-/// Extract gradients from leaf nodes of a gradient tree.
-///
-/// # Arguments
-///
-/// * `code` - The contraction tree
-/// * `grad_tree` - The gradient tree from back_propagate
-/// * `num_inputs` - Total number of input tensors; used to pre-allocate the
-///   result vector and index gradients by their original tensor positions.
-///
-/// # Returns
-///
-/// Vector of gradients, one per input tensor in original order.
-pub fn extract_leaves<T: Scalar, B: Backend>(
-    code: &NestedEinsum<usize>,
-    grad_tree: &CacheTree<T, B>,
-    num_inputs: usize,
-) -> Vec<Tensor<T, B>> {
-    let mut result: Vec<Option<Tensor<T, B>>> = vec![None; num_inputs];
-    extract_leaves_impl(code, grad_tree, &mut result);
-    result.into_iter().map(|opt| opt.unwrap()).collect()
+fn finalize_tape_node<A, T, B>(
+    node: TapeNode<T, B>,
+    current_ix: &[usize],
+    expected_ix: &[usize],
+    size_dict: &HashMap<usize, usize>,
+) -> TapeNode<T, B>
+where
+    A: Algebra<Scalar = T, Index = u32>,
+    T: Scalar + BackendScalar<B>,
+    B: Backend,
+{
+    if current_ix == expected_ix {
+        node
+    } else {
+        let (content, argmax) = if A::needs_argmax() {
+            let (content, argmax) = execute_unary_with_argmax::<A, T, B>(
+                &node.content,
+                current_ix,
+                expected_ix,
+                size_dict,
+            );
+            (content, Some(argmax))
+        } else {
+            (
+                execute_unary_naive::<A, T, B>(&node.content, current_ix, expected_ix, size_dict),
+                None,
+            )
+        };
+        TapeNode::unary(
+            current_ix.to_vec(),
+            expected_ix.to_vec(),
+            content,
+            argmax,
+            node,
+        )
+    }
 }
 
-fn extract_leaves_impl<T: Scalar, B: Backend>(
-    code: &NestedEinsum<usize>,
-    grad_tree: &CacheTree<T, B>,
-    result: &mut [Option<Tensor<T, B>>],
-) {
-    match code {
-        NestedEinsum::Leaf { tensor_index } => {
-            result[*tensor_index] = Some(grad_tree.content.clone());
+fn backprop_tape_node<A, T, B>(
+    node: &TapeNode<T, B>,
+    dy: &Tensor<T, B>,
+    size_dict: &HashMap<usize, usize>,
+    grads: &mut [Option<Tensor<T, B>>],
+) where
+    A: Algebra<Scalar = T, Index = u32>,
+    T: Scalar + BackendScalar<B>,
+    B: Backend,
+{
+    match &node.op {
+        TapeOp::Leaf { tensor_index } => {
+            grads[*tensor_index] = Some(dy.clone());
         }
-        NestedEinsum::Node { args, .. } => {
-            for (arg, sibling) in args.iter().zip(grad_tree.siblings.iter()) {
-                extract_leaves_impl(arg, sibling, result);
-            }
+        TapeOp::Unary {
+            input_ix,
+            output_ix,
+        } => {
+            let child = &node.children[0];
+            let grad_child = if A::needs_argmax() {
+                let argmax = node
+                    .argmax
+                    .as_ref()
+                    .expect("Tropical unary backward requires argmax from forward pass");
+                tropical_unary_backward::<T, B>(dy, argmax, child.content.shape())
+            } else {
+                contract_unary_backward::<A, T, B>(dy, input_ix, output_ix, size_dict)
+            };
+            backprop_tape_node::<A, T, B>(child, &grad_child, size_dict, grads);
+        }
+        TapeOp::Binary {
+            left_ix,
+            right_ix,
+            output_ix,
+        } => {
+            let left = &node.children[0];
+            let right = &node.children[1];
+            let (grad_left, grad_right) = contract_binary_backward::<A, T, B>(
+                dy,
+                &left.content,
+                &right.content,
+                node.argmax.as_ref(),
+                left_ix,
+                right_ix,
+                output_ix,
+            );
+            backprop_tape_node::<A, T, B>(left, &grad_left, size_dict, grads);
+            backprop_tape_node::<A, T, B>(right, &grad_right, size_dict, grads);
         }
     }
 }
@@ -548,18 +661,8 @@ where
     T: Scalar + BackendScalar<B>,
     B: Backend,
 {
-    // Require optimization
-    let tree = code
-        .contraction_tree()
-        .expect("cost_and_gradient requires optimized Einsum. Call optimize_greedy() first.");
-
-    // Handle single tensor case specially
-    if xs.len() == 1 {
-        return cost_and_gradient_unary::<A, T, B>(code, xs[0], dy);
-    }
-
-    // Forward pass with caching
-    let cache = cached_einsum::<A, T, B>(tree, xs, &code.size_dict);
+    let tape = build_gradient_tape::<A, T, B>(code, xs);
+    let cost = tape.result();
 
     // Initialize dy if not provided
     let dy_tensor = match dy {
@@ -571,74 +674,13 @@ where
                 "cost_and_gradient: output must be scalar when dy is None. Got output indices: {:?}",
                 code.iy
             );
-            Tensor::from_data_with_backend(
-                &[A::one().to_scalar()],
-                &[],
-                cache.content.backend().clone(),
-            )
+            Tensor::from_data_with_backend(&[A::one().to_scalar()], &[], cost.backend().clone())
         }
     };
 
-    // Backward pass through the tree
-    let grad_tree = back_propagate::<A, T, B>(tree, &cache, &dy_tensor, &code.size_dict);
+    let grads = tape.backward::<A>(&dy_tensor);
 
-    // Extract leaf gradients
-    let grads = extract_leaves(tree, &grad_tree, xs.len());
-
-    (cache.content, grads)
-}
-
-/// Handle unary case for cost_and_gradient.
-fn cost_and_gradient_unary<A, T, B>(
-    code: &Einsum<usize>,
-    x: &Tensor<T, B>,
-    dy: Option<&Tensor<T, B>>,
-) -> (Tensor<T, B>, Vec<Tensor<T, B>>)
-where
-    A: Algebra<Scalar = T, Index = u32>,
-    T: Scalar + BackendScalar<B>,
-    B: Backend,
-{
-    // Forward pass
-    let (result, argmax) = if A::needs_argmax() {
-        super::engine::execute_unary_with_argmax::<A, T, B>(
-            x,
-            &code.ixs[0],
-            &code.iy,
-            &code.size_dict,
-        )
-    } else {
-        (
-            super::engine::execute_unary_naive::<A, T, B>(
-                x,
-                &code.ixs[0],
-                &code.iy,
-                &code.size_dict,
-            ),
-            Tensor::from_data_with_backend(&[0u32], &[], x.backend().clone()), // Dummy, won't be used
-        )
-    };
-
-    // Initialize dy if not provided
-    let dy_tensor = match dy {
-        Some(d) => d.clone(),
-        None => {
-            assert!(
-                code.iy.is_empty(),
-                "cost_and_gradient: output must be scalar when dy is None"
-            );
-            Tensor::from_data_with_backend(&[A::one().to_scalar()], &[], x.backend().clone())
-        }
-    };
-
-    // Backward pass
-    let grad = if A::needs_argmax() {
-        tropical_unary_backward::<T, B>(&dy_tensor, &argmax, x.shape())
-    } else {
-        contract_unary_backward::<A, T, B>(&dy_tensor, &code.ixs[0], &code.iy, &code.size_dict)
-    };
-
-    (result, vec![grad])
+    (cost, grads)
 }
 
 #[cfg(test)]

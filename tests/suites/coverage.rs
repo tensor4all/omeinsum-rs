@@ -944,10 +944,7 @@ fn test_batched_tropical_forward() {
 }
 
 #[test]
-fn test_einsum_with_grad_more_than_two() {
-    // Test that backward for >2 tensors is not yet implemented
-    // This documents the current limitation
-
+fn test_einsum_with_grad_three_tensor_backward() {
     let a = Tensor::<f64, Cpu>::from_data(&[1.0, 2.0, 3.0, 4.0], &[2, 2]);
     let b = Tensor::<f64, Cpu>::from_data(&[1.0, 0.0, 0.0, 1.0], &[2, 2]);
     let c = Tensor::<f64, Cpu>::from_data(&[2.0, 0.0, 0.0, 2.0], &[2, 2]);
@@ -959,14 +956,15 @@ fn test_einsum_with_grad_more_than_two() {
     );
 
     assert_eq!(result.shape(), &[2, 2]);
+    assert_eq!(result.to_vec(), vec![2.0, 4.0, 6.0, 8.0]);
 
-    // Attempting backward should panic with unimplemented
     let grad_output = Tensor::<f64, Cpu>::from_data(&[1.0, 0.0, 0.0, 1.0], &[2, 2]);
+    let grads = grad_fn.backward::<Standard<f64>>(&grad_output, &[&a, &b, &c]);
 
-    let result =
-        std::panic::catch_unwind(|| grad_fn.backward::<Standard<f64>>(&grad_output, &[&a, &b, &c]));
-
-    assert!(result.is_err(), "backward for >2 tensors should panic");
+    assert_eq!(grads.len(), 3);
+    assert_eq!(grads[0].to_vec(), vec![2.0, 0.0, 0.0, 2.0]);
+    assert_eq!(grads[1].to_vec(), vec![2.0, 6.0, 4.0, 8.0]);
+    assert_eq!(grads[2].to_vec(), vec![1.0, 3.0, 2.0, 4.0]);
 }
 
 #[test]

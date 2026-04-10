@@ -46,7 +46,7 @@ fn test_bayesian_network_marginals() {
     // Then with ψ₁₂ → shape [2]
     // Finally with φ₂ → scalar
     //
-    // We'll do it in steps since einsum_with_grad only supports 2 tensors currently
+    // We'll do it in steps to keep the factor-graph contraction flow explicit.
 
     // Step 1: Contract φ₀ with ψ₀₁: result[j] = Σᵢ φ₀[i] × ψ₀₁[i,j]
     let t1 = einsum::<Standard<f64>, _, _>(&[&phi0, &psi01], &[&[0], &[0, 1]], &[1]);

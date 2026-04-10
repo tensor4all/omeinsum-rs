@@ -70,35 +70,19 @@ where
     let size_dict = infer_size_dict(tensors, ixs);
     let ixs_owned: Vec<Vec<usize>> = ixs.iter().map(|ix| ix.to_vec()).collect();
 
-    let mut ein = Einsum::new(ixs_owned.clone(), iy.to_vec(), size_dict.clone());
+    let mut ein = Einsum::new(ixs_owned, iy.to_vec(), size_dict);
     ein.optimize_greedy();
 
-    // Only track argmax for algebras that need it (tropical algebras)
-    // Standard algebra computes gradients via einsum, no argmax needed
-    let (result, argmax_cache) = if A::needs_argmax() {
-        ein.execute_with_argmax::<A, T, B>(tensors)
-    } else {
-        (ein.execute::<A, T, B>(tensors), Vec::new())
-    };
-
-    let gradient = EinsumGradient {
-        ixs: ixs_owned,
-        iy: iy.to_vec(),
-        size_dict,
-        argmax_cache,
-        _phantom: std::marker::PhantomData,
-    };
+    let tape = backward::build_gradient_tape::<A, T, B>(&ein, tensors);
+    let result = tape.result();
+    let gradient = EinsumGradient { tape };
 
     (result, gradient)
 }
 
 /// Gradient computation helper for einsum.
 pub struct EinsumGradient<T: Scalar, B: Backend> {
-    ixs: Vec<Vec<usize>>,
-    iy: Vec<usize>,
-    size_dict: std::collections::HashMap<usize, usize>,
-    argmax_cache: Vec<Tensor<u32, B>>,
-    _phantom: std::marker::PhantomData<T>,
+    tape: backward::GradientTape<T, B>,
 }
 
 impl<T: Scalar + BackendScalar<B>, B: Backend> EinsumGradient<T, B> {
@@ -119,70 +103,23 @@ impl<T: Scalar + BackendScalar<B>, B: Backend> EinsumGradient<T, B> {
     ) -> Vec<Tensor<T, B>> {
         assert_eq!(
             inputs.len(),
-            self.ixs.len(),
+            self.tape.num_inputs(),
             "Number of inputs {} doesn't match stored indices {}",
             inputs.len(),
-            self.ixs.len()
+            self.tape.num_inputs()
         );
 
-        // Handle single input case
-        if inputs.len() == 1 {
-            let grad_x = if A::needs_argmax() {
-                // Tropical algebras: route gradients through argmax
-                let argmax = self
-                    .argmax_cache
-                    .first()
-                    .expect("Tropical unary backward requires argmax from forward pass");
-                backward::tropical_unary_backward::<T, B>(grad_output, argmax, inputs[0].shape())
-            } else {
-                // Standard algebra: use index-exchange trick
-                // Forward: y = einsum(ix -> iy, x)
-                // Backward: grad_x = einsum(iy -> ix, grad_y)
-                backward::contract_unary_backward::<A, T, B>(
-                    grad_output,
-                    &self.ixs[0],
-                    &self.iy,
-                    &self.size_dict,
-                )
-            };
-            return vec![grad_x];
-        }
-
-        // For a single binary contraction (2 inputs), we can directly compute gradients
-        if inputs.len() == 2 {
-            let argmax = if A::needs_argmax() && !self.argmax_cache.is_empty() {
-                Some(&self.argmax_cache[0])
-            } else {
-                None
-            };
-
-            let (grad_a, grad_b) = backward::contract_binary_backward::<A, T, B>(
-                grad_output,
-                inputs[0],
-                inputs[1],
-                argmax,
-                &self.ixs[0],
-                &self.ixs[1],
-                &self.iy,
+        for (input, expected_shape) in inputs.iter().zip(self.tape.input_shapes()) {
+            assert_eq!(
+                input.shape(),
+                expected_shape.as_slice(),
+                "Input shape {:?} doesn't match tape shape {:?}",
+                input.shape(),
+                expected_shape
             );
-
-            return vec![grad_a, grad_b];
         }
 
-        // For more complex contractions with >2 tensors, we need to reverse through
-        // the contraction tree. This requires storing intermediate results from forward pass.
-        // For now, implement the simple case.
-        //
-        // TODO: Implement full backward pass for multi-tensor contractions
-        // This would require:
-        // 1. Storing intermediate results during forward pass
-        // 2. Reversing through the contraction tree
-        // 3. Accumulating gradients for each input
-        unimplemented!(
-            "Backward pass for {} inputs not yet implemented. \
-             Currently only 2-input contractions are supported.",
-            inputs.len()
-        )
+        self.tape.backward::<A>(grad_output)
     }
 }
 

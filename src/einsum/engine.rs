@@ -475,7 +475,7 @@ fn compute_intermediate_output(ia: &[usize], ib: &[usize], final_output: &[usize
     output
 }
 
-fn compute_normalized_binary_indices(
+pub(crate) fn compute_normalized_binary_indices(
     ix: &[usize],
     other: &[usize],
     output: &[usize],
