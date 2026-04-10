@@ -8,6 +8,11 @@ NON_GPU_FEATURES := tropical parallel
 .PHONY: docs-build docs-serve docs-book docs-book-serve
 .PHONY: fmt fmt-check clippy lint coverage
 .PHONY: example-basic example-tropical
+.PHONY: cli
+.PHONY: release copilot-review run-plan
+
+# Cross-platform sed in-place: macOS needs -i '', Linux needs -i
+SED_I := sed -i$(shell if [ "$$(uname)" = "Darwin" ]; then echo " ''"; fi)
 
 # Default target
 all: build test
@@ -56,6 +61,18 @@ help:
 	@echo ""
 	@echo "Utility targets:"
 	@echo "  clean          - Clean build artifacts"
+	@echo ""
+	@echo "CLI targets:"
+	@echo "  cli            - Build and install the omeinsum CLI to ~/.cargo/bin"
+	@echo ""
+	@echo "Release targets:"
+	@echo "  release V=x.y.z - Tag and push a new release (triggers CI publish)"
+	@echo "  copilot-review   - Request Copilot code review on current PR"
+	@echo ""
+	@echo "Agent targets:"
+	@echo "  run-plan         - Execute a plan with Claude or Codex (latest plan in docs/plans/)"
+	@echo "                     Set RUNNER=claude to use Claude (default: codex)"
+	@echo "                     Override CLAUDE_MODEL or CODEX_MODEL to pick a different model"
 
 #==============================================================================
 # Environment Setup
@@ -185,3 +202,72 @@ clean:
 	rm -rf coverage/
 	rm -rf docs/book/
 	@echo "Clean complete."
+
+#==============================================================================
+# CLI
+#==============================================================================
+
+cli:
+	cargo install --path omeinsum-cli
+
+#==============================================================================
+# Release
+#==============================================================================
+
+# Release a new version: make release V=0.2.0
+release:
+ifndef V
+	$(error Usage: make release V=x.y.z)
+endif
+	@echo "Releasing v$(V)..."
+	$(SED_I) 's/^version = ".*"/version = "$(V)"/' Cargo.toml
+	cargo check
+	git add Cargo.toml
+	git commit -m "release: v$(V)"
+	git tag -a "v$(V)" -m "Release v$(V)"
+	git push origin main --tags
+	@echo "v$(V) pushed — CI will publish to crates.io"
+
+# Request Copilot code review on the current PR
+# Requires: gh extension install ChrisCarini/gh-copilot-review
+copilot-review:
+	@PR=$$(gh pr view --json number --jq .number 2>/dev/null) || { echo "No PR found for current branch"; exit 1; }; \
+	echo "Requesting Copilot review on PR #$$PR..."; \
+	gh copilot-review $$PR
+
+#==============================================================================
+# Agent-driven plan execution
+#==============================================================================
+
+RUNNER ?= codex
+CLAUDE_MODEL ?= opus
+CODEX_MODEL ?= gpt-5.4
+
+# Run a plan with Codex or Claude
+# Usage: make run-plan [INSTRUCTIONS="..."] [OUTPUT=output.log] [RUNNER=codex]
+# PLAN_FILE defaults to the most recently modified file in docs/plans/
+INSTRUCTIONS ?=
+OUTPUT ?= run-plan-output.log
+PLAN_FILE ?= $(shell ls -t docs/plans/*.md 2>/dev/null | head -1)
+
+run-plan:
+	@. scripts/make_helpers.sh; \
+	NL=$$'\n'; \
+	BRANCH=$$(git branch --show-current); \
+	PLAN_FILE="$(PLAN_FILE)"; \
+	if [ -z "$$PLAN_FILE" ]; then echo "No plan files found in docs/plans/"; exit 1; fi; \
+	if [ "$(RUNNER)" = "claude" ]; then \
+		PROCESS="1. Read the plan file$${NL}2. Execute the plan — it specifies which skill(s) to use$${NL}3. Push: git push origin $$BRANCH$${NL}4. If a PR already exists for this branch, skip. Otherwise create one."; \
+	else \
+		PROCESS="1. Read the plan file$${NL}2. If the plan references repo-local workflow docs under .claude/skills/*/SKILL.md, open and follow them directly. Treat slash-command names as aliases for those files.$${NL}3. Execute the tasks step by step. For each task, implement and test before moving on.$${NL}4. Push: git push origin $$BRANCH$${NL}5. If a PR already exists for this branch, skip. Otherwise create one."; \
+	fi; \
+	PROMPT="Execute the plan in '$$PLAN_FILE'."; \
+	if [ "$(RUNNER)" != "claude" ]; then \
+		PROMPT="$${PROMPT}$${NL}$${NL}Repo-local skills live in .claude/skills/*/SKILL.md. Treat any slash-command references in the plan as aliases for those skill files."; \
+	fi; \
+	if [ -n "$(INSTRUCTIONS)" ]; then \
+		PROMPT="$${PROMPT}$${NL}$${NL}## Additional Instructions$${NL}$(INSTRUCTIONS)"; \
+	fi; \
+	PROMPT="$${PROMPT}$${NL}$${NL}## Process$${NL}$${PROCESS}$${NL}$${NL}## Rules$${NL}- Tests should be strong enough to catch regressions.$${NL}- Do not modify tests to make them pass.$${NL}- Test failure must be reported."; \
+	echo "=== Prompt ===" && echo "$$PROMPT" && echo "===" ; \
+	RUNNER="$(RUNNER)" run_agent "$(OUTPUT)" "$$PROMPT"

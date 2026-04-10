@@ -37,3 +37,6 @@ dist/
 build/
 *.whl
 .worktrees/
+docs/superpowers/
+docs/test-reports/
+*.log

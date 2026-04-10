@@ -6,7 +6,7 @@ mod optimize;
 mod parse;
 
 #[derive(Parser)]
-#[command(name = "omeinsum", about = "Einstein summation CLI")]
+#[command(name = "omeinsum", version, about = "Einstein summation CLI")]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
@@ -23,9 +23,47 @@ enum Commands {
         #[arg(long)]
         sizes: String,
 
-        /// Optimization method
+        /// Optimization method: "greedy" or "treesa"
         #[arg(long, default_value = "greedy")]
         method: String,
+
+        // -- greedy parameters --
+        /// [greedy] Weight for output-vs-input size balance (default: 0.0)
+        #[arg(long)]
+        alpha: Option<f64>,
+
+        /// [greedy] Temperature for stochastic selection; 0 = deterministic (default: 0.0)
+        #[arg(long)]
+        temperature: Option<f64>,
+
+        // -- treesa parameters --
+        /// [treesa] Number of independent SA trials (default: 10)
+        #[arg(long)]
+        ntrials: Option<usize>,
+
+        /// [treesa] Iterations per temperature level (default: 50)
+        #[arg(long)]
+        niters: Option<usize>,
+
+        /// [treesa] Space complexity target threshold (default: 20.0)
+        #[arg(long)]
+        sc_target: Option<f64>,
+
+        /// [treesa] Inverse temperature schedule as "start:step:stop" (default: "0.01:0.05:15.0")
+        #[arg(long)]
+        betas: Option<String>,
+
+        /// [treesa] Time complexity weight (default: 1.0)
+        #[arg(long)]
+        tc_weight: Option<f64>,
+
+        /// [treesa] Space complexity weight (default: 1.0)
+        #[arg(long)]
+        sc_weight: Option<f64>,
+
+        /// [treesa] Read-write complexity weight (default: 0.0)
+        #[arg(long)]
+        rw_weight: Option<f64>,
 
         /// Output file (default: stdout)
         #[arg(short, long)]
@@ -65,9 +103,35 @@ fn main() {
             expression,
             sizes,
             method,
+            alpha,
+            temperature,
+            ntrials,
+            niters,
+            sc_target,
+            betas,
+            tc_weight,
+            sc_weight,
+            rw_weight,
             output,
             pretty,
-        } => optimize::run(&expression, &sizes, &method, output.as_deref(), pretty),
+        } => optimize::run(
+            &expression,
+            &sizes,
+            &method,
+            optimize::OptimizeParams {
+                alpha,
+                temperature,
+                ntrials,
+                niters,
+                sc_target,
+                betas,
+                tc_weight,
+                sc_weight,
+                rw_weight,
+            },
+            output.as_deref(),
+            pretty,
+        ),
         Commands::Contract {
             tensors,
             topology,

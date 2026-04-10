@@ -11,6 +11,7 @@
 - [Tensor API](./tensor-api.md)
 - [Einsum API](./einsum-api.md)
 - [Contraction Optimization](./optimization.md)
+- [CLI Tool](./cli.md)
 - [Showcase Examples](./examples.md)
 
 # Reference

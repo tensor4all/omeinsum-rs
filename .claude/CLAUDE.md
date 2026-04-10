@@ -19,11 +19,24 @@ make help
 make cargo-check
 make check
 make test
+make cli            # Build and install the omeinsum CLI to ~/.cargo/bin
 cargo test --test main
 cargo test --features tropical
 ```
 
 `make check` is the canonical pre-PR gate. It runs formatting, clippy, and the non-GPU test suite.
+
+## CLI (`omeinsum`)
+
+Install with `make cli`. Two subcommands:
+
+- **`omeinsum optimize`** — Optimize contraction order for an einsum expression.
+  `omeinsum optimize "ij,jk->ik" --sizes "i=2,j=3,k=4"` (methods: `greedy`, `treesa`).
+  Greedy accepts `--alpha`, `--temperature`. TreeSA accepts `--ntrials`, `--niters`,
+  `--betas`, `--sc-target`, `--tc-weight`, `--sc-weight`, `--rw-weight`.
+- **`omeinsum contract`** — Execute a tensor contraction from a tensors JSON file.
+  Requires either `--topology <file>` (from optimize) or `--expr "(ij,jk),kl->il"`.
+  Supported dtypes: f32, f64, c32, c64.
 
 ## Testing Conventions
 

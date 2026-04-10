@@ -65,6 +65,19 @@ cargo test --features tropical
 | `MinPlus<T>` | min | + | Shortest path |
 | `MaxMul<T>` | max | × | Max probability |
 
+## CLI Tool
+
+Install and use the `omeinsum` CLI for contraction optimization and execution without writing Rust code:
+
+```bash
+make cli                    # install to ~/.cargo/bin
+
+omeinsum optimize "ij,jk->ik" --sizes "i=2,j=3,k=2" -o topo.json
+omeinsum contract tensors.json -t topo.json
+```
+
+See the [CLI documentation](https://tensor4all.github.io/omeinsum-rs/cli.html) for JSON formats, parenthesized expressions, and a full walkthrough.
+
 ## Contraction Optimization
 
 ```rust

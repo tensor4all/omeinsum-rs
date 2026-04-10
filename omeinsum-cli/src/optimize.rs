@@ -1,39 +1,117 @@
 use std::collections::HashMap;
 use std::io::{self, IsTerminal, Write};
 
+use omeco::{optimize_code, EinCode, GreedyMethod, TreeSA};
+
 use crate::format::TopologyFile;
 use crate::parse::parse_flat;
+
+/// Method-specific hyperparameters passed from the CLI.
+#[derive(Default)]
+pub struct OptimizeParams {
+    // greedy
+    pub alpha: Option<f64>,
+    pub temperature: Option<f64>,
+    // treesa
+    pub ntrials: Option<usize>,
+    pub niters: Option<usize>,
+    pub sc_target: Option<f64>,
+    pub betas: Option<String>,
+    pub tc_weight: Option<f64>,
+    pub sc_weight: Option<f64>,
+    pub rw_weight: Option<f64>,
+}
+
+/// Parse a "start:step:stop" string into a Vec of betas.
+fn parse_betas(s: &str) -> Result<Vec<f64>, String> {
+    let parts: Vec<&str> = s.split(':').collect();
+    if parts.len() != 3 {
+        return Err(format!(
+            "Invalid betas '{s}': expected 'start:step:stop' (e.g., '0.01:0.05:15.0')"
+        ));
+    }
+    let start: f64 = parts[0]
+        .parse()
+        .map_err(|_| format!("Invalid betas start '{}'", parts[0]))?;
+    let step: f64 = parts[1]
+        .parse()
+        .map_err(|_| format!("Invalid betas step '{}'", parts[1]))?;
+    let stop: f64 = parts[2]
+        .parse()
+        .map_err(|_| format!("Invalid betas stop '{}'", parts[2]))?;
+    if step <= 0.0 {
+        return Err("Betas step must be positive".to_string());
+    }
+    let mut betas = Vec::new();
+    let mut v = start;
+    while v <= stop {
+        betas.push(v);
+        v += step;
+    }
+    if betas.is_empty() {
+        return Err(format!(
+            "Betas '{s}' produced an empty schedule (start > stop?)"
+        ));
+    }
+    Ok(betas)
+}
 
 /// Run the optimize subcommand.
 pub fn run(
     expr: &str,
     sizes_str: &str,
     method: &str,
+    params: OptimizeParams,
     output: Option<&str>,
     pretty: Option<bool>,
 ) -> Result<(), String> {
     let parsed = parse_flat(expr)?;
     let size_dict = parse_sizes(sizes_str, &parsed.label_map)?;
 
-    let mut ein = omeinsum::Einsum::new(parsed.ixs.clone(), parsed.iy.clone(), size_dict.clone());
-    match method {
+    let code = EinCode::new(parsed.ixs.clone(), parsed.iy.clone());
+    let tree = match method {
         "greedy" => {
-            ein.optimize_greedy();
+            let alpha = params.alpha.unwrap_or(0.0);
+            let temperature = params.temperature.unwrap_or(0.0);
+            let optimizer = GreedyMethod::new(alpha, temperature);
+            optimize_code(&code, &size_dict, &optimizer)
         }
         "treesa" => {
-            ein.optimize_treesa();
+            let mut optimizer = TreeSA::default();
+            if let Some(ntrials) = params.ntrials {
+                optimizer.ntrials = ntrials;
+            }
+            if let Some(niters) = params.niters {
+                optimizer.niters = niters;
+            }
+            if let Some(betas_str) = params.betas {
+                optimizer.betas = parse_betas(&betas_str)?;
+            }
+            let mut score = optimizer.score;
+            if let Some(v) = params.sc_target {
+                score.sc_target = v;
+            }
+            if let Some(v) = params.tc_weight {
+                score.tc_weight = v;
+            }
+            if let Some(v) = params.sc_weight {
+                score.sc_weight = v;
+            }
+            if let Some(v) = params.rw_weight {
+                score.rw_weight = v;
+            }
+            optimizer.score = score;
+            optimize_code(&code, &size_dict, &optimizer)
         }
         _ => {
             return Err(format!(
                 "Unknown method '{method}': expected 'greedy' or 'treesa'"
             ));
         }
-    }
+    };
 
-    let tree = ein
-        .contraction_tree()
-        .ok_or_else(|| "Optimization produced no contraction tree".to_string())?
-        .clone();
+    let tree =
+        tree.ok_or_else(|| "Optimization produced no contraction tree".to_string())?;
 
     let label_map = parsed
         .label_map
