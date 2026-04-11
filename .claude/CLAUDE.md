@@ -28,7 +28,7 @@ cargo test --features tropical
 
 ## CLI (`omeinsum`)
 
-Install with `make cli`. Two subcommands:
+Install with `make cli`. Three subcommands:
 
 - **`omeinsum optimize`** — Optimize contraction order for an einsum expression.
   `omeinsum optimize "ij,jk->ik" --sizes "i=2,j=3,k=4"` (methods: `greedy`, `treesa`).
@@ -37,6 +37,10 @@ Install with `make cli`. Two subcommands:
 - **`omeinsum contract`** — Execute a tensor contraction from a tensors JSON file.
   Requires either `--topology <file>` (from optimize) or `--expr "(ij,jk),kl->il"`.
   Supported dtypes: f32, f64, c32, c64.
+- **`omeinsum autodiff`** — Execute a contraction and emit the forward result plus
+  gradients for each input tensor. Uses the same `--topology` or `--expr` contract
+  selection as `contract`. `--grad-output <file>` is optional for scalar outputs and
+  required for non-scalar outputs. Supported dtypes: f32, f64, c32, c64.
 
 ## Testing Conventions
 

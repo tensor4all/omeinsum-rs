@@ -61,6 +61,30 @@ pub struct ResultFile {
     pub data: Vec<f64>,
 }
 
+/// Tensor payload used inside higher-level result bundles.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TensorDataFile {
+    pub shape: Vec<usize>,
+    pub data: Vec<f64>,
+}
+
+/// A gradient tensor paired with its input position.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GradientFile {
+    pub input_index: usize,
+    pub shape: Vec<usize>,
+    pub data: Vec<f64>,
+}
+
+/// The autodiff JSON output schema.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AutodiffResultFile {
+    pub dtype: Dtype,
+    pub order: StorageOrder,
+    pub result: TensorDataFile,
+    pub gradients: Vec<GradientFile>,
+}
+
 /// Convert row-major flat data to column-major for a given shape.
 pub fn row_to_col_major(data: &[f64], shape: &[usize]) -> Vec<f64> {
     if shape.len() <= 1 {

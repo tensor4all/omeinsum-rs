@@ -1,6 +1,6 @@
 # CLI Tool
 
-The `omeinsum` command-line tool optimizes contraction order and executes tensor contractions from JSON files, without writing Rust code.
+The `omeinsum` command-line tool optimizes contraction order, executes tensor contractions, and computes autodiff gradients from JSON files, without writing Rust code.
 
 ## Installation
 
@@ -89,6 +89,29 @@ omeinsum contract tensors.json --expr "(ij,jk),kl->il"
 | `-o, --output` | no | Output file (default: stdout) |
 | `--pretty` | no | `true` or `false`; auto-detects TTY when omitted |
 
+### `omeinsum autodiff`
+
+Executes a contraction and emits both the forward result and gradients with respect to each input tensor. Requires either a pre-computed topology (`-t`) or an explicit contraction order (`--expr`), just like `contract`.
+
+```bash
+# Scalar output: seed defaults to 1
+omeinsum autodiff tensors.json --expr "ii->"
+
+# Non-scalar output: provide the output gradient seed explicitly
+omeinsum autodiff tensors.json --expr "ij,jk->ik" --grad-output dy.json -o autodiff.json
+```
+
+| Argument | Required | Description |
+|----------|----------|-------------|
+| `<tensors>` | yes | Path to tensors JSON file |
+| `-t, --topology` | one of `-t` or `--expr` | Topology JSON from `optimize` |
+| `--expr` | one of `-t` or `--expr` | Parenthesized expression (same parser as `contract`) |
+| `--grad-output` | required for non-scalar outputs | Gradient seed for the einsum output, using the Result JSON schema |
+| `-o, --output` | no | Output file (default: stdout) |
+| `--pretty` | no | `true` or `false`; auto-detects TTY when omitted |
+
+If `--grad-output` is omitted, the forward result must be scalar and the CLI uses a unit seed automatically. For complex dtypes, that unit seed is `1 + 0i`.
+
 ## Parenthesized Expressions
 
 The `--expr` flag specifies the contraction order using parentheses. Each pair of parentheses denotes one binary contraction step, executed inside-out:
@@ -142,6 +165,35 @@ If you don't know the best order, use `omeinsum optimize` to find one automatica
 
 The output uses the same `order` as the input. The `data` array is the flattened result tensor.
 
+### Output: Autodiff Result File
+
+Produced by `autodiff`:
+
+```json
+{
+  "dtype": "f64",
+  "order": "row_major",
+  "result": {
+    "shape": [2, 2],
+    "data": [19.0, 22.0, 43.0, 50.0]
+  },
+  "gradients": [
+    {
+      "input_index": 0,
+      "shape": [2, 2],
+      "data": [11.0, 15.0, 11.0, 15.0]
+    },
+    {
+      "input_index": 1,
+      "shape": [2, 2],
+      "data": [4.0, 4.0, 6.0, 6.0]
+    }
+  ]
+}
+```
+
+The output uses the same `dtype` and `order` as the input tensor file. Each gradient is tagged with its zero-based `input_index`.
+
 ### Intermediate: Topology File
 
 Produced by `optimize`, consumed by `contract -t`. You can treat it as a black box. The structure contains the original expression, a label-to-integer mapping, dimension sizes, and a binary contraction tree.
@@ -173,4 +225,16 @@ omeinsum contract /tmp/tensors.json -t /tmp/topology.json
 omeinsum contract /tmp/tensors.json --expr "(ij,jk)->ik"
 
 # Same output
+
+# 4. Differentiate the same contraction with an explicit output-gradient seed
+cat > /tmp/dy.json << 'EOF'
+{
+  "dtype": "f64",
+  "order": "row_major",
+  "shape": [2, 2],
+  "data": [1, 1, 1, 1]
+}
+EOF
+
+omeinsum autodiff /tmp/tensors.json --expr "ij,jk->ik" --grad-output /tmp/dy.json
 ```

@@ -513,3 +513,247 @@ fn test_contract_unknown_label_in_topology_error() {
         .failure()
         .stderr(contains("unknown label index"));
 }
+
+#[test]
+fn test_autodiff_scalar_output_default_seed() {
+    let tensors = write_temp_json(
+        r#"{
+        "dtype": "f64",
+        "order": "col_major",
+        "tensors": [
+            {"shape": [2, 2], "data": [1.0, 2.0, 3.0, 4.0]}
+        ]
+    }"#,
+    );
+
+    let output = cmd()
+        .args([
+            "autodiff",
+            "--expr",
+            "ii->",
+            tensors.path().to_str().unwrap(),
+            "--pretty",
+            "false",
+        ])
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let result: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(result["dtype"], "f64");
+    assert_eq!(result["order"], "col_major");
+    assert_eq!(result["result"]["shape"], serde_json::json!([]));
+    let result_data: Vec<f64> = serde_json::from_value(result["result"]["data"].clone()).unwrap();
+    assert_eq!(result_data, vec![5.0]);
+
+    let gradients = result["gradients"].as_array().unwrap();
+    assert_eq!(gradients.len(), 1);
+    assert_eq!(gradients[0]["input_index"], 0);
+    assert_eq!(gradients[0]["shape"], serde_json::json!([2, 2]));
+    let grad_data: Vec<f64> = serde_json::from_value(gradients[0]["data"].clone()).unwrap();
+    assert_eq!(grad_data, vec![1.0, 0.0, 0.0, 1.0]);
+}
+
+#[test]
+fn test_autodiff_seeded_nonscalar_row_major() {
+    let tensors = write_temp_json(
+        r#"{
+        "dtype": "f64",
+        "order": "row_major",
+        "tensors": [
+            {"shape": [2, 2], "data": [1.0, 2.0, 3.0, 4.0]},
+            {"shape": [2, 2], "data": [5.0, 6.0, 7.0, 8.0]}
+        ]
+    }"#,
+    );
+    let grad_output = write_temp_json(
+        r#"{
+        "dtype": "f64",
+        "order": "row_major",
+        "shape": [2, 2],
+        "data": [1.0, 1.0, 1.0, 1.0]
+    }"#,
+    );
+
+    let output = cmd()
+        .args([
+            "autodiff",
+            "--expr",
+            "ij,jk->ik",
+            "--grad-output",
+            grad_output.path().to_str().unwrap(),
+            tensors.path().to_str().unwrap(),
+            "--pretty",
+            "false",
+        ])
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let result: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(result["dtype"], "f64");
+    assert_eq!(result["order"], "row_major");
+    assert_eq!(result["result"]["shape"], serde_json::json!([2, 2]));
+    let result_data: Vec<f64> = serde_json::from_value(result["result"]["data"].clone()).unwrap();
+    assert_eq!(result_data, vec![19.0, 22.0, 43.0, 50.0]);
+
+    let gradients = result["gradients"].as_array().unwrap();
+    assert_eq!(gradients.len(), 2);
+    assert_eq!(gradients[0]["input_index"], 0);
+    assert_eq!(gradients[1]["input_index"], 1);
+    let grad_a: Vec<f64> = serde_json::from_value(gradients[0]["data"].clone()).unwrap();
+    let grad_b: Vec<f64> = serde_json::from_value(gradients[1]["data"].clone()).unwrap();
+    assert_eq!(grad_a, vec![11.0, 15.0, 11.0, 15.0]);
+    assert_eq!(grad_b, vec![4.0, 4.0, 6.0, 6.0]);
+}
+
+#[test]
+fn test_autodiff_nonscalar_requires_grad_output() {
+    let tensors = write_temp_json(
+        r#"{
+        "dtype": "f64",
+        "order": "col_major",
+        "tensors": [
+            {"shape": [2, 2], "data": [1.0, 2.0, 3.0, 4.0]},
+            {"shape": [2, 2], "data": [5.0, 6.0, 7.0, 8.0]}
+        ]
+    }"#,
+    );
+
+    cmd()
+        .args([
+            "autodiff",
+            "--expr",
+            "ij,jk->ik",
+            tensors.path().to_str().unwrap(),
+        ])
+        .assert()
+        .failure()
+        .stderr(contains("Non-scalar output requires --grad-output"));
+}
+
+#[test]
+fn test_autodiff_grad_output_shape_mismatch() {
+    let tensors = write_temp_json(
+        r#"{
+        "dtype": "f64",
+        "order": "col_major",
+        "tensors": [
+            {"shape": [2, 2], "data": [1.0, 2.0, 3.0, 4.0]},
+            {"shape": [2, 2], "data": [5.0, 6.0, 7.0, 8.0]}
+        ]
+    }"#,
+    );
+    let grad_output = write_temp_json(
+        r#"{
+        "dtype": "f64",
+        "order": "col_major",
+        "shape": [4],
+        "data": [1.0, 1.0, 1.0, 1.0]
+    }"#,
+    );
+
+    cmd()
+        .args([
+            "autodiff",
+            "--expr",
+            "ij,jk->ik",
+            "--grad-output",
+            grad_output.path().to_str().unwrap(),
+            tensors.path().to_str().unwrap(),
+        ])
+        .assert()
+        .failure()
+        .stderr(contains("grad_output shape"));
+}
+
+#[test]
+fn test_autodiff_with_topology_scalar_output() {
+    let topo_file = NamedTempFile::new().unwrap();
+    let topo_path = topo_file.path().to_str().unwrap().to_string();
+
+    cmd()
+        .args(["optimize", "ii->", "--sizes", "i=2", "-o", &topo_path])
+        .assert()
+        .success();
+
+    let tensors = write_temp_json(
+        r#"{
+        "dtype": "f64",
+        "order": "col_major",
+        "tensors": [
+            {"shape": [2, 2], "data": [1.0, 2.0, 3.0, 4.0]}
+        ]
+    }"#,
+    );
+
+    let output = cmd()
+        .args([
+            "autodiff",
+            "-t",
+            &topo_path,
+            tensors.path().to_str().unwrap(),
+            "--pretty",
+            "false",
+        ])
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let result: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let result_data: Vec<f64> = serde_json::from_value(result["result"]["data"].clone()).unwrap();
+    assert_eq!(result_data, vec![5.0]);
+    let gradients = result["gradients"].as_array().unwrap();
+    let grad_data: Vec<f64> = serde_json::from_value(gradients[0]["data"].clone()).unwrap();
+    assert_eq!(grad_data, vec![1.0, 0.0, 0.0, 1.0]);
+}
+
+#[test]
+fn test_autodiff_grad_output_order_mismatch() {
+    let tensors = write_temp_json(
+        r#"{
+        "dtype": "f64",
+        "order": "col_major",
+        "tensors": [
+            {"shape": [2, 2], "data": [1.0, 2.0, 3.0, 4.0]},
+            {"shape": [2, 2], "data": [5.0, 6.0, 7.0, 8.0]}
+        ]
+    }"#,
+    );
+    let grad_output = write_temp_json(
+        r#"{
+        "dtype": "f64",
+        "order": "row_major",
+        "shape": [2, 2],
+        "data": [1.0, 1.0, 1.0, 1.0]
+    }"#,
+    );
+
+    cmd()
+        .args([
+            "autodiff",
+            "--expr",
+            "ij,jk->ik",
+            "--grad-output",
+            grad_output.path().to_str().unwrap(),
+            tensors.path().to_str().unwrap(),
+        ])
+        .assert()
+        .failure()
+        .stderr(contains("grad_output order"));
+}

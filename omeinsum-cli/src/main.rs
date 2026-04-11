@@ -1,5 +1,7 @@
 use clap::{Parser, Subcommand};
 
+mod autodiff;
+mod common;
 mod contract;
 mod format;
 mod optimize;
@@ -94,6 +96,31 @@ enum Commands {
         #[arg(long)]
         pretty: Option<bool>,
     },
+    /// Execute autodiff and emit the forward result plus input gradients
+    Autodiff {
+        /// Tensors JSON file
+        tensors: String,
+
+        /// Topology JSON file
+        #[arg(short = 't', long)]
+        topology: Option<String>,
+
+        /// Parenthesized einsum expression with explicit contraction order
+        #[arg(long)]
+        expr: Option<String>,
+
+        /// Gradient seed for the einsum output, using the Result JSON schema
+        #[arg(long = "grad-output")]
+        grad_output: Option<String>,
+
+        /// Output file (default: stdout)
+        #[arg(short, long)]
+        output: Option<String>,
+
+        /// Pretty-print JSON (default: auto-detect TTY)
+        #[arg(long)]
+        pretty: Option<bool>,
+    },
 }
 
 fn main() {
@@ -142,6 +169,21 @@ fn main() {
             &tensors,
             topology.as_deref(),
             expr.as_deref(),
+            output.as_deref(),
+            pretty,
+        ),
+        Commands::Autodiff {
+            tensors,
+            topology,
+            expr,
+            grad_output,
+            output,
+            pretty,
+        } => autodiff::run(
+            &tensors,
+            topology.as_deref(),
+            expr.as_deref(),
+            grad_output.as_deref(),
             output.as_deref(),
             pretty,
         ),

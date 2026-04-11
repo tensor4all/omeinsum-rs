@@ -67,13 +67,14 @@ cargo test --features tropical
 
 ## CLI Tool
 
-Install and use the `omeinsum` CLI for contraction optimization and execution without writing Rust code:
+Install and use the `omeinsum` CLI for contraction optimization, execution, and autodiff without writing Rust code:
 
 ```bash
 make cli                    # install to ~/.cargo/bin
 
 omeinsum optimize "ij,jk->ik" --sizes "i=2,j=3,k=2" -o topo.json
 omeinsum contract tensors.json -t topo.json
+omeinsum autodiff tensors.json --expr "ii->"
 ```
 
 See the [CLI documentation](https://tensor4all.github.io/omeinsum-rs/cli.html) for JSON formats, parenthesized expressions, and a full walkthrough.
