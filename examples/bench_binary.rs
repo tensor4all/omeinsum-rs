@@ -2,29 +2,23 @@
 //!
 //! Run with: cargo run --release --example bench_binary
 
-use omeinsum::{einsum, Cpu, Tensor};
 use omeinsum::algebra::Standard;
+use omeinsum::{einsum, Cpu, Tensor};
 use std::time::Instant;
 
 fn main() {
     println!("=== Binary Einsum Benchmark (dim size = 2) ===\n");
-
-    // Reset profiling stats
-    #[cfg(feature = "profile-permute")]
-    omeinsum::reset_permute_stats();
 
     // Test cases: (name, rank_a, rank_b, num_contracted, num_batch)
     let test_cases = [
         // Simple cases
         ("matmul 10x10", 10, 10, 5, 0),
         ("batched matmul 8x8 batch=4", 8, 8, 4, 4),
-
         // High-dimensional cases (like tensor network contractions)
         ("high-D 12x12 contract=6", 12, 12, 6, 0),
         ("high-D 15x15 contract=7", 15, 15, 7, 0),
         ("high-D 18x18 contract=8", 18, 18, 8, 0),
         ("high-D 20x20 contract=9", 20, 20, 9, 0),
-
         // With batch dimensions
         ("high-D 12x12 contract=4 batch=4", 12, 12, 4, 4),
         ("high-D 15x15 contract=5 batch=5", 15, 15, 5, 5),
@@ -33,16 +27,15 @@ fn main() {
     for (name, rank_a, rank_b, num_contracted, num_batch) in test_cases {
         bench_binary_einsum(name, rank_a, rank_b, num_contracted, num_batch);
     }
-
-    // Print profiling stats
-    #[cfg(feature = "profile-permute")]
-    {
-        println!("\n=== Permutation Profile ===");
-        omeinsum::print_permute_stats();
-    }
 }
 
-fn bench_binary_einsum(name: &str, rank_a: usize, rank_b: usize, num_contracted: usize, num_batch: usize) {
+fn bench_binary_einsum(
+    name: &str,
+    rank_a: usize,
+    rank_b: usize,
+    num_contracted: usize,
+    num_batch: usize,
+) {
     // Build index labels
     // A has: [left_a..., contracted..., batch...]
     // B has: [contracted..., right_b..., batch...]
@@ -70,19 +63,22 @@ fn bench_binary_einsum(name: &str, rank_a: usize, rank_b: usize, num_contracted:
     let batch_indices: Vec<usize> = (next_idx..next_idx + num_batch).collect();
 
     // Build index arrays
-    let ixs_a: Vec<usize> = left_indices.iter()
+    let ixs_a: Vec<usize> = left_indices
+        .iter()
         .chain(contracted_indices.iter())
         .chain(batch_indices.iter())
         .copied()
         .collect();
 
-    let ixs_b: Vec<usize> = contracted_indices.iter()
+    let ixs_b: Vec<usize> = contracted_indices
+        .iter()
         .chain(right_indices.iter())
         .chain(batch_indices.iter())
         .copied()
         .collect();
 
-    let ixs_c: Vec<usize> = left_indices.iter()
+    let ixs_c: Vec<usize> = left_indices
+        .iter()
         .chain(right_indices.iter())
         .chain(batch_indices.iter())
         .copied()
@@ -136,8 +132,17 @@ fn bench_binary_einsum(name: &str, rank_a: usize, rank_b: usize, num_contracted:
 
     println!("{}", name);
     println!("  A: rank={}, B: rank={}", rank_a, rank_b);
-    println!("  left={}, contract={}, right={}, batch={}", num_left_a, num_contracted, num_right_b, num_batch);
-    println!("  GEMM: [{}x{}] @ [{}x{}] x {} batches", left_size, contract_size, contract_size, right_size, batch_size);
-    println!("  Time: {:.3} ms, Bandwidth: {:.2} GB/s", avg_ms, bandwidth_gbs);
+    println!(
+        "  left={}, contract={}, right={}, batch={}",
+        num_left_a, num_contracted, num_right_b, num_batch
+    );
+    println!(
+        "  GEMM: [{}x{}] @ [{}x{}] x {} batches",
+        left_size, contract_size, contract_size, right_size, batch_size
+    );
+    println!(
+        "  Time: {:.3} ms, Bandwidth: {:.2} GB/s",
+        avg_ms, bandwidth_gbs
+    );
     println!();
 }

@@ -1,6 +1,6 @@
 //! Test if faer supports strided matrices for GEMM
-use faer::mat::{MatRef, MatMut};
 use faer::linalg::matmul::matmul;
+use faer::mat::{MatMut, MatRef};
 use faer::{Accum, Par};
 
 fn main() {

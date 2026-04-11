@@ -13,16 +13,15 @@ use omeco::{contraction_complexity, optimize_code, EinCode, GreedyMethod, Nested
 use omeinsum::algebra::Standard;
 use omeinsum::{Cpu, Einsum, Tensor};
 use rand::seq::SliceRandom;
-use rand::thread_rng;
 use serde::{Deserialize, Serialize};
 
 const NETWORK_FILE: &str = "benches/network_3reg_150.json";
 
 /// Generate a random 3-regular graph using configuration model
 fn generate_3_regular_graph(n: usize) -> Vec<(usize, usize)> {
-    assert!(n % 2 == 0 && n >= 4, "n must be even and >= 4");
+    assert!(n.is_multiple_of(2) && n >= 4, "n must be even and >= 4");
 
-    let mut rng = thread_rng();
+    let mut rng = rand::rng();
     let mut stubs: Vec<usize> = (0..n).flat_map(|v| vec![v; 3]).collect();
 
     for _ in 0..1000 {
@@ -136,18 +135,16 @@ fn generate_network(n_vertices: usize, bond_dim: usize, output: &Path) {
     // Try both optimizers and use the one with lower sc
     println!("Optimizing with GreedyMethod...");
     let greedy = GreedyMethod::new(0.0, 0.0);
-    let greedy_tree = optimize_code(&code, &size_dict, &greedy)
-        .expect("Failed to optimize contraction order");
+    let greedy_tree =
+        optimize_code(&code, &size_dict, &greedy).expect("Failed to optimize contraction order");
     let greedy_cc = contraction_complexity(&greedy_tree, &size_dict, &ixs);
     println!("  Greedy: tc={:.2}, sc={:.2}", greedy_cc.tc, greedy_cc.sc);
 
     println!("Optimizing with TreeSA (ntrials=1, niters=100)...");
     // Match omeco benchmark parameters - no sc_target, use niters
-    let treesa = TreeSA::default()
-        .with_ntrials(1)
-        .with_niters(100);
-    let treesa_tree = optimize_code(&code, &size_dict, &treesa)
-        .expect("Failed to optimize contraction order");
+    let treesa = TreeSA::default().with_ntrials(1).with_niters(100);
+    let treesa_tree =
+        optimize_code(&code, &size_dict, &treesa).expect("Failed to optimize contraction order");
     let treesa_cc = contraction_complexity(&treesa_tree, &size_dict, &ixs);
     println!("  TreeSA: tc={:.2}, sc={:.2}", treesa_cc.tc, treesa_cc.sc);
 
@@ -241,8 +238,12 @@ fn run_benchmark(input: &Path, n_iterations: usize) {
             }
         }
     }
-    println!("  Depth: {}, Nodes: {}, Max intermediate indices: {}",
-             tree_depth(&tree), tree_size(&tree), max_intermediate_indices(&tree));
+    println!(
+        "  Depth: {}, Nodes: {}, Max intermediate indices: {}",
+        tree_depth(&tree),
+        tree_size(&tree),
+        max_intermediate_indices(&tree)
+    );
 
     // Warmup with timing
     println!("Warming up (1 iteration)...");
@@ -250,7 +251,10 @@ fn run_benchmark(input: &Path, n_iterations: usize) {
     for _ in 0..1 {
         let _ = einsum.execute::<Standard<f32>, f32, Cpu>(&tensor_refs);
     }
-    println!("  Warmup took: {:.3}s", warmup_start.elapsed().as_secs_f64());
+    println!(
+        "  Warmup took: {:.3}s",
+        warmup_start.elapsed().as_secs_f64()
+    );
 
     // Benchmark
     println!("Running {} iterations...", n_iterations);
@@ -265,9 +269,6 @@ fn run_benchmark(input: &Path, n_iterations: usize) {
 
     println!("Result: {}", result_val);
 
-    // Print profiling stats if enabled
-    #[cfg(feature = "profile-contract")]
-    omeinsum::print_profile_stats();
     println!(
         "Total: {:.3}s, Per iteration: {:.3}ms",
         elapsed.as_secs_f64(),
