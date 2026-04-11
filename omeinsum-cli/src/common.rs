@@ -263,6 +263,7 @@ where
             tensors.len()
         ));
     }
+    validate_size_dict_labels(&parsed.ixs, &parsed.iy, &size_dict)?;
 
     let mut ein = Einsum::new(parsed.ixs, parsed.iy, size_dict);
     ein.set_contraction_tree(topology.tree);
@@ -324,6 +325,23 @@ fn validate_shape(data: &[f64], shape: &[usize], is_complex: bool) -> Result<(),
             expected_len
         ));
     }
+    Ok(())
+}
+
+fn validate_size_dict_labels(
+    ixs: &[Vec<usize>],
+    iy: &[usize],
+    size_dict: &HashMap<usize, usize>,
+) -> Result<(), String> {
+    for &label in ixs.iter().flatten().chain(iy.iter()) {
+        if !size_dict.contains_key(&label) {
+            return Err(format!(
+                "Missing size for label index {} referenced by topology expression",
+                label
+            ));
+        }
+    }
+
     Ok(())
 }
 
