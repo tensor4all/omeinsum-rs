@@ -3,7 +3,7 @@
 
 NON_GPU_FEATURES := tropical parallel
 
-.PHONY: all build build-debug cargo-check check test test-gpu test-release bench docs clean help
+.PHONY: all build build-debug cargo-check check test test-gpu test-release bench bench-binary bench-network bench-julia bench-compare docs clean help
 .PHONY: setup setup-rust
 .PHONY: docs-build docs-serve docs-book docs-book-serve
 .PHONY: fmt fmt-check clippy lint coverage
@@ -40,7 +40,11 @@ help:
 	@echo "  test-release   - Run tests in release mode (non-GPU features)"
 	@echo ""
 	@echo "Benchmark targets:"
-	@echo "  bench          - Run benchmarks"
+	@echo "  bench          - Run all Rust benchmarks"
+	@echo "  bench-binary   - Run binary contraction benchmarks"
+	@echo "  bench-network  - Run tensor-network benchmarks"
+	@echo "  bench-julia    - Run Julia benchmarks in benchmarks/julia/"
+	@echo "  bench-compare  - Compare Rust vs Julia benchmark timings"
 	@echo ""
 	@echo "Example targets:"
 	@echo "  example-basic     - Run basic einsum example"
@@ -126,9 +130,22 @@ test-release:
 #==============================================================================
 
 bench:
-	@echo "Running benchmarks..."
-	cargo bench
-	@echo "Benchmarks complete."
+	@echo "Running all Rust benchmarks..."
+	$(MAKE) bench-binary
+	$(MAKE) bench-network
+	@echo "All Rust benchmarks complete. Results in target/criterion/"
+
+bench-binary:
+	cargo bench --bench binary
+
+bench-network:
+	cargo bench --bench network
+
+bench-julia:
+	cd benchmarks/julia && julia --project=. -e 'using Pkg; Pkg.instantiate()' && julia --project=. generate_timings.jl
+
+bench-compare:
+	python3 benchmarks/compare.py
 
 #==============================================================================
 # Examples
