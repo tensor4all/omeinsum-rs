@@ -4,6 +4,11 @@ use super::Tensor;
 use crate::algebra::{Algebra, Scalar};
 use crate::backend::{Backend, BackendScalar};
 
+#[derive(Default)]
+pub(crate) struct BinaryContractOptions {
+    pub preferred_output_indices: Option<Vec<usize>>,
+}
+
 /// Compute output shape from input shapes and modes.
 fn compute_output_shape(
     shape_a: &[usize],
@@ -73,6 +78,52 @@ impl<T: Scalar, B: Backend> Tensor<T, B> {
         (result, argmax.expect("argmax requested but not returned"))
     }
 
+    pub(crate) fn contract_binary_with_options<A: Algebra<Scalar = T, Index = u32>>(
+        &self,
+        other: &Self,
+        ia: &[usize],
+        ib: &[usize],
+        iy: &[usize],
+        options: &BinaryContractOptions,
+    ) -> Self
+    where
+        T: BackendScalar<B>,
+    {
+        let (result, _) = self.contract_binary_impl_with_options::<A>(
+            other,
+            ia,
+            ib,
+            iy,
+            false,
+            options,
+        );
+        result
+    }
+
+    pub(crate) fn contract_binary_with_argmax_with_options<
+        A: Algebra<Scalar = T, Index = u32>,
+    >(
+        &self,
+        other: &Self,
+        ia: &[usize],
+        ib: &[usize],
+        iy: &[usize],
+        options: &BinaryContractOptions,
+    ) -> (Self, Tensor<u32, B>)
+    where
+        T: BackendScalar<B>,
+    {
+        let (result, argmax) = self.contract_binary_impl_with_options::<A>(
+            other,
+            ia,
+            ib,
+            iy,
+            true,
+            options,
+        );
+        (result, argmax.expect("argmax requested but not returned"))
+    }
+
     fn contract_binary_impl<A: Algebra<Scalar = T, Index = u32>>(
         &self,
         other: &Self,
@@ -84,13 +135,50 @@ impl<T: Scalar, B: Backend> Tensor<T, B> {
     where
         T: BackendScalar<B>,
     {
+        self.contract_binary_impl_with_options::<A>(
+            other,
+            ia,
+            ib,
+            iy,
+            track_argmax,
+            &BinaryContractOptions::default(),
+        )
+    }
+
+    pub(crate) fn contract_binary_impl_with_options<A: Algebra<Scalar = T, Index = u32>>(
+        &self,
+        other: &Self,
+        ia: &[usize],
+        ib: &[usize],
+        iy: &[usize],
+        track_argmax: bool,
+        options: &BinaryContractOptions,
+    ) -> (Self, Option<Tensor<u32, B>>)
+    where
+        T: BackendScalar<B>,
+    {
         assert_eq!(ia.len(), self.ndim(), "ia length must match self.ndim()");
         assert_eq!(ib.len(), other.ndim(), "ib length must match other.ndim()");
+
+        let output_indices = options
+            .preferred_output_indices
+            .as_deref()
+            .unwrap_or(iy);
+        if let Some(preferred_output_indices) = &options.preferred_output_indices {
+            let mut preferred_sorted = preferred_output_indices.clone();
+            preferred_sorted.sort_unstable();
+            let mut output_sorted = iy.to_vec();
+            output_sorted.sort_unstable();
+            debug_assert_eq!(
+                preferred_sorted, output_sorted,
+                "preferred output indices must be a permutation of iy"
+            );
+        }
 
         // Convert usize indices to i32 modes
         let modes_a: Vec<i32> = ia.iter().map(|&i| i as i32).collect();
         let modes_b: Vec<i32> = ib.iter().map(|&i| i as i32).collect();
-        let modes_c: Vec<i32> = iy.iter().map(|&i| i as i32).collect();
+        let modes_c: Vec<i32> = output_indices.iter().map(|&i| i as i32).collect();
 
         // Compute output shape
         let shape_c =

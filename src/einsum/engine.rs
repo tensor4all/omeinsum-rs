@@ -6,7 +6,7 @@ use omeco::{optimize_code, EinCode, GreedyMethod, Label, NestedEinsum, TreeSA};
 
 use crate::algebra::{Algebra, Scalar};
 use crate::backend::{Backend, BackendScalar};
-use crate::tensor::Tensor;
+use crate::tensor::{BinaryContractOptions, Tensor};
 
 /// Einsum specification and execution engine.
 ///
@@ -142,8 +142,18 @@ impl Einsum<usize> {
                         &self.size_dict,
                     )
                 } else {
-                    let result = self.execute_tree::<A, T, B>(tree, tensors);
-                    finalize_optimized_result::<A, T, B>(result, tree, &self.iy, &self.size_dict)
+                    let emit_final_root_output =
+                        can_emit_final_root_output(optimized_tree_output(tree), &self.iy);
+                    let result = self.execute_tree::<A, T, B>(
+                        tree,
+                        tensors,
+                        emit_final_root_output.then_some(self.iy.as_slice()),
+                    );
+                    if emit_final_root_output {
+                        result
+                    } else {
+                        finalize_optimized_result::<A, T, B>(result, tree, &self.iy, &self.size_dict)
+                    }
                 }
             }
             None => self.execute_pairwise::<A, T, B>(tensors),
@@ -195,15 +205,25 @@ impl Einsum<usize> {
                         )
                     }
                 } else {
-                    let result =
-                        self.execute_tree_with_argmax::<A, T, B>(tree, tensors, &mut argmax_cache);
-                    finalize_optimized_result_with_argmax::<A, T, B>(
-                        result,
+                    let emit_final_root_output =
+                        can_emit_final_root_output(optimized_tree_output(tree), &self.iy);
+                    let result = self.execute_tree_with_argmax::<A, T, B>(
                         tree,
-                        &self.iy,
-                        &self.size_dict,
+                        tensors,
                         &mut argmax_cache,
-                    )
+                        emit_final_root_output.then_some(self.iy.as_slice()),
+                    );
+                    if emit_final_root_output {
+                        result
+                    } else {
+                        finalize_optimized_result_with_argmax::<A, T, B>(
+                            result,
+                            tree,
+                            &self.iy,
+                            &self.size_dict,
+                            &mut argmax_cache,
+                        )
+                    }
                 }
             }
             None => self.execute_pairwise_with_argmax::<A, T, B>(tensors, &mut argmax_cache),
@@ -219,6 +239,7 @@ impl Einsum<usize> {
         tree: &NestedEinsum<usize>,
         tensors: &[&Tensor<T, B>],
         argmax_cache: &mut Vec<Tensor<u32, B>>,
+        preferred_output_indices: Option<&[usize]>,
     ) -> Tensor<T, B>
     where
         A: Algebra<Scalar = T, Index = u32>,
@@ -230,10 +251,18 @@ impl Einsum<usize> {
             NestedEinsum::Node { args, eins } => {
                 assert_eq!(args.len(), 2, "Expected binary contraction tree");
 
-                let left =
-                    self.execute_tree_with_argmax::<A, T, B>(&args[0], tensors, argmax_cache);
-                let right =
-                    self.execute_tree_with_argmax::<A, T, B>(&args[1], tensors, argmax_cache);
+                let left = self.execute_tree_with_argmax::<A, T, B>(
+                    &args[0],
+                    tensors,
+                    argmax_cache,
+                    None,
+                );
+                let right = self.execute_tree_with_argmax::<A, T, B>(
+                    &args[1],
+                    tensors,
+                    argmax_cache,
+                    None,
+                );
 
                 let ia = &eins.ixs[0];
                 let ib = &eins.ixs[1];
@@ -249,12 +278,29 @@ impl Einsum<usize> {
                 );
 
                 if A::needs_argmax() {
-                    let (result, argmax) =
-                        left.contract_binary_with_argmax::<A>(&right, &ia, &ib, iy);
+                    let (result, argmax) = if let Some(preferred_output_indices) =
+                        preferred_output_indices
+                    {
+                        let options = BinaryContractOptions {
+                            preferred_output_indices: Some(preferred_output_indices.to_vec()),
+                        };
+                        left.contract_binary_with_argmax_with_options::<A>(
+                            &right, &ia, &ib, iy, &options,
+                        )
+                    } else {
+                        left.contract_binary_with_argmax::<A>(&right, &ia, &ib, iy)
+                    };
                     argmax_cache.push(argmax);
                     result
                 } else {
-                    left.contract_binary::<A>(&right, &ia, &ib, iy)
+                    if let Some(preferred_output_indices) = preferred_output_indices {
+                        let options = BinaryContractOptions {
+                            preferred_output_indices: Some(preferred_output_indices.to_vec()),
+                        };
+                        left.contract_binary_with_options::<A>(&right, &ia, &ib, iy, &options)
+                    } else {
+                        left.contract_binary::<A>(&right, &ia, &ib, iy)
+                    }
                 }
             }
         }
@@ -353,6 +399,7 @@ impl Einsum<usize> {
         &self,
         tree: &NestedEinsum<usize>,
         tensors: &[&Tensor<T, B>],
+        preferred_output_indices: Option<&[usize]>,
     ) -> Tensor<T, B>
     where
         A: Algebra<Scalar = T, Index = u32>,
@@ -364,8 +411,8 @@ impl Einsum<usize> {
             NestedEinsum::Node { args, eins } => {
                 assert_eq!(args.len(), 2, "Expected binary contraction tree");
 
-                let left = self.execute_tree::<A, T, B>(&args[0], tensors);
-                let right = self.execute_tree::<A, T, B>(&args[1], tensors);
+                let left = self.execute_tree::<A, T, B>(&args[0], tensors, None);
+                let right = self.execute_tree::<A, T, B>(&args[1], tensors, None);
 
                 let ia = &eins.ixs[0];
                 let ib = &eins.ixs[1];
@@ -380,7 +427,14 @@ impl Einsum<usize> {
                     &self.size_dict,
                 );
 
-                left.contract_binary::<A>(&right, &ia, &ib, iy)
+                if let Some(preferred_output_indices) = preferred_output_indices {
+                    let options = BinaryContractOptions {
+                        preferred_output_indices: Some(preferred_output_indices.to_vec()),
+                    };
+                    left.contract_binary_with_options::<A>(&right, &ia, &ib, iy, &options)
+                } else {
+                    left.contract_binary::<A>(&right, &ia, &ib, iy)
+                }
             }
         }
     }
@@ -524,6 +578,18 @@ fn optimized_tree_output(tree: &NestedEinsum<usize>) -> &[usize] {
         }
         NestedEinsum::Node { eins, .. } => &eins.iy,
     }
+}
+
+fn can_emit_final_root_output(tree_output: &[usize], final_output: &[usize]) -> bool {
+    if tree_output.len() != final_output.len() {
+        return false;
+    }
+
+    let tree_set: HashSet<usize> = tree_output.iter().copied().collect();
+    let final_set: HashSet<usize> = final_output.iter().copied().collect();
+    tree_set.len() == tree_output.len()
+        && final_set.len() == final_output.len()
+        && tree_set == final_set
 }
 
 fn finalize_optimized_result<A, T, B>(
@@ -1000,6 +1066,22 @@ mod tests {
     }
 
     // Tests for helper functions
+
+    #[test]
+    fn test_root_output_plan_uses_final_order_for_pure_permutation() {
+        let tree_output = vec![2, 0, 1];
+        let final_output = vec![0, 1, 2];
+
+        assert!(can_emit_final_root_output(&tree_output, &final_output));
+    }
+
+    #[test]
+    fn test_root_output_plan_rejects_non_permutation_finalize_cases() {
+        let tree_output = vec![0, 1, 2];
+        let final_output = vec![0, 0, 2];
+
+        assert!(!can_emit_final_root_output(&tree_output, &final_output));
+    }
 
     #[test]
     fn test_linear_to_multi_empty_shape() {
