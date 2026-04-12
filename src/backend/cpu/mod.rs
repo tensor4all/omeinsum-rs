@@ -1,5 +1,6 @@
 //! CPU backend implementation.
 
+mod buffer_pool;
 mod contract;
 
 use super::traits::{Backend, BackendScalar, Storage};

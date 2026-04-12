@@ -286,6 +286,7 @@ fn analyze_contraction_layout(
     }
 }
 
+use super::buffer_pool::ScratchPool;
 use super::MatrixLayout;
 use crate::algebra::Algebra;
 use crate::backend::Cpu;
@@ -391,7 +392,6 @@ fn materialize_matrix_operand<T: Copy + Default>(
     row_modes: &[i32],
     col_modes: &[i32],
 ) -> MaterializedMatrixOperand<T> {
-    let contiguous = ensure_contiguous(data, shape, strides);
     let perm = compute_permutation(modes, batch_modes, row_modes, col_modes);
     let target_modes: Vec<i32> = batch_modes
         .iter()
@@ -403,9 +403,12 @@ fn materialize_matrix_operand<T: Copy + Default>(
         .iter()
         .map(|&mode| shape[mode_position(modes, mode)])
         .collect();
+    let mut scratch = Vec::new();
 
     MaterializedMatrixOperand {
-        data: permute_data(&contiguous, shape, &perm),
+        data: materialize_with_permutation_into(data, shape, strides, &perm, &mut scratch)
+            .as_slice()
+            .to_vec(),
         strides: compute_contiguous_strides(&target_shape),
         shape: target_shape,
         modes: target_modes,
@@ -433,6 +436,19 @@ fn finalize_contraction_output<T: Copy + Default>(
         permute_data(&c_data, &c_shape_current, output_perm)
     } else {
         c_data
+    }
+}
+
+enum MaterializedSlice<'a, T> {
+    Borrowed(&'a [T]),
+    Scratch(&'a [T]),
+}
+
+impl<'a, T> MaterializedSlice<'a, T> {
+    fn as_slice(&self) -> &'a [T] {
+        match self {
+            Self::Borrowed(data) | Self::Scratch(data) => data,
+        }
     }
 }
 
@@ -549,30 +565,39 @@ where
         }
     }
 
-    // 3. Make inputs contiguous if needed for the generic materialized path.
-    let a_contig = ensure_contiguous(a, shape_a, strides_a);
-    let b_contig = ensure_contiguous(b, shape_b, strides_b);
+    let mut a_pool = ScratchPool::<A::Scalar>::default();
+    let mut b_pool = ScratchPool::<A::Scalar>::default();
 
-    // 4. Reduce trace modes before generic GEMM.
-    let (a_data, a_shape, a_modes) = if !left_trace.is_empty() {
-        reduce_trace_modes::<A>(&a_contig, shape_a, modes_a, &left_trace)
+    // 3. Reduce trace modes before the generic GEMM fallback.
+    let (a_reduced, a_shape, a_modes, a_strides) = if !left_trace.is_empty() {
+        let (a_data, a_shape, a_modes) = {
+            let mut a_contig = a_pool.acquire(shape_a.iter().product::<usize>().max(1));
+            let a_contig = ensure_contiguous_into(a, shape_a, strides_a, a_contig.as_mut_vec());
+            reduce_trace_modes::<A>(a_contig.as_slice(), shape_a, modes_a, &left_trace)
+        };
+        let a_strides = compute_contiguous_strides(&a_shape);
+        (Some(a_data), a_shape, a_modes, a_strides)
     } else {
-        (a_contig, shape_a.to_vec(), modes_a.to_vec())
+        (None, shape_a.to_vec(), modes_a.to_vec(), strides_a.to_vec())
     };
-    let (b_data, b_shape, b_modes) = if !right_trace.is_empty() {
-        reduce_trace_modes::<A>(&b_contig, shape_b, modes_b, &right_trace)
+    let (b_reduced, b_shape, b_modes, b_strides) = if !right_trace.is_empty() {
+        let (b_data, b_shape, b_modes) = {
+            let mut b_contig = b_pool.acquire(shape_b.iter().product::<usize>().max(1));
+            let b_contig = ensure_contiguous_into(b, shape_b, strides_b, b_contig.as_mut_vec());
+            reduce_trace_modes::<A>(b_contig.as_slice(), shape_b, modes_b, &right_trace)
+        };
+        let b_strides = compute_contiguous_strides(&b_shape);
+        (Some(b_data), b_shape, b_modes, b_strides)
     } else {
-        (b_contig, shape_b.to_vec(), modes_b.to_vec())
+        (None, shape_b.to_vec(), modes_b.to_vec(), strides_b.to_vec())
     };
 
-    let a_layout_strides = compute_contiguous_strides(&a_shape);
-    let b_layout_strides = compute_contiguous_strides(&b_shape);
     let plan = analyze_contraction_layout(
         &a_shape,
-        &a_layout_strides,
+        &a_strides,
         &a_modes,
         &b_shape,
-        &b_layout_strides,
+        &b_strides,
         &b_modes,
         modes_c,
     );
@@ -584,7 +609,12 @@ where
         &plan.contracted_modes,
         &plan.batch_modes,
     );
-    let a_permuted = permute_data(&a_data, &a_shape, &a_perm);
+    let mut a_permuted_scratch = a_pool.acquire(a_shape.iter().product::<usize>().max(1));
+    let a_permuted = if let Some(ref a_data) = a_reduced {
+        permute_data_into(a_data, &a_shape, &a_perm, a_permuted_scratch.as_mut_vec())
+    } else {
+        materialize_with_permutation_into(a, &a_shape, &a_strides, &a_perm, a_permuted_scratch.as_mut_vec())
+    };
 
     // 6. Permute B to [contracted, right_free, batch] - batch LAST
     let b_perm = compute_permutation(
@@ -593,24 +623,29 @@ where
         &plan.right_modes,
         &plan.batch_modes,
     );
-    let b_permuted = permute_data(&b_data, &b_shape, &b_perm);
+    let mut b_permuted_scratch = b_pool.acquire(b_shape.iter().product::<usize>().max(1));
+    let b_permuted = if let Some(ref b_data) = b_reduced {
+        permute_data_into(b_data, &b_shape, &b_perm, b_permuted_scratch.as_mut_vec())
+    } else {
+        materialize_with_permutation_into(b, &b_shape, &b_strides, &b_perm, b_permuted_scratch.as_mut_vec())
+    };
 
     // 7. Call GEMM
     let c_data = if plan.batch_modes.is_empty() {
         cpu.gemm_internal::<A>(
-            &a_permuted,
+            a_permuted.as_slice(),
             plan.left_size,
             plan.contract_size,
-            &b_permuted,
+            b_permuted.as_slice(),
             plan.right_size,
         )
     } else {
         cpu.gemm_batched_internal::<A>(
-            &a_permuted,
+            a_permuted.as_slice(),
             plan.batch_size,
             plan.left_size,
             plan.contract_size,
-            &b_permuted,
+            b_permuted.as_slice(),
             plan.right_size,
         )
     };
@@ -620,53 +655,58 @@ where
 
 /// Ensure data is contiguous (copy if strided).
 fn ensure_contiguous<T: Copy + Default>(data: &[T], shape: &[usize], strides: &[usize]) -> Vec<T> {
-    let expected_strides = compute_contiguous_strides(shape);
-    if strides == expected_strides {
-        data.to_vec()
-    } else {
-        // Copy with stride handling
-        let numel: usize = shape.iter().product();
-        let mut result = vec![T::default(); numel];
-        copy_strided_to_contiguous(data, &mut result, shape, strides);
-        result
-    }
+    let mut scratch = Vec::new();
+    ensure_contiguous_into(data, shape, strides, &mut scratch)
+        .as_slice()
+        .to_vec()
 }
 
-/// Copy strided data to contiguous buffer.
-fn copy_strided_to_contiguous<T: Copy>(
-    src: &[T],
-    dst: &mut [T],
+fn ensure_contiguous_into<'a, T: Copy + Default>(
+    data: &'a [T],
     shape: &[usize],
     strides: &[usize],
-) {
-    let numel: usize = shape.iter().product();
-
-    for (i, dst_elem) in dst.iter_mut().enumerate().take(numel) {
-        // Convert linear index to multi-index
-        let mut remaining = i;
-        let mut src_offset = 0;
-        for dim in 0..shape.len() {
-            let coord = remaining % shape[dim];
-            remaining /= shape[dim];
-            src_offset += coord * strides[dim];
-        }
-        *dst_elem = src[src_offset];
-    }
+    scratch: &'a mut Vec<T>,
+) -> MaterializedSlice<'a, T> {
+    let identity: Vec<usize> = (0..shape.len()).collect();
+    materialize_with_permutation_into(data, shape, strides, &identity, scratch)
 }
 
 /// Permute data according to axis permutation.
 fn permute_data<T: Copy + Default>(data: &[T], shape: &[usize], perm: &[usize]) -> Vec<T> {
-    if perm.iter().enumerate().all(|(i, &p)| i == p) {
-        return data.to_vec(); // Already in correct order
+    let mut scratch = Vec::new();
+    permute_data_into(data, shape, perm, &mut scratch)
+        .as_slice()
+        .to_vec()
+}
+
+fn permute_data_into<'a, T: Copy + Default>(
+    data: &'a [T],
+    shape: &[usize],
+    perm: &[usize],
+    scratch: &'a mut Vec<T>,
+) -> MaterializedSlice<'a, T> {
+    let strides = compute_contiguous_strides(shape);
+    materialize_with_permutation_into(data, shape, &strides, perm, scratch)
+}
+
+fn materialize_with_permutation_into<'a, T: Copy + Default>(
+    data: &'a [T],
+    shape: &[usize],
+    strides: &[usize],
+    perm: &[usize],
+    scratch: &'a mut Vec<T>,
+) -> MaterializedSlice<'a, T> {
+    let expected_strides = compute_contiguous_strides(shape);
+    if strides == expected_strides && perm.iter().enumerate().all(|(i, &p)| i == p) {
+        return MaterializedSlice::Borrowed(data);
     }
 
-    let new_shape: Vec<usize> = perm.iter().map(|&p| shape[p]).collect();
+    scratch.clear();
     let numel: usize = shape.iter().product();
-    let mut result = vec![T::default(); numel];
+    scratch.resize(numel, T::default());
+    let new_shape: Vec<usize> = perm.iter().map(|&p| shape[p]).collect();
 
-    let old_strides = compute_contiguous_strides(shape);
-
-    for (new_idx, result_elem) in result.iter_mut().enumerate().take(numel) {
+    for (new_idx, result_elem) in scratch.iter_mut().enumerate().take(numel) {
         // Convert new linear index to new multi-index
         let mut remaining = new_idx;
         let mut new_coords = vec![0; shape.len()];
@@ -678,13 +718,13 @@ fn permute_data<T: Copy + Default>(data: &[T], shape: &[usize], perm: &[usize]) 
         // Map to old coordinates via inverse permutation
         let mut old_idx = 0;
         for (new_dim, &old_dim) in perm.iter().enumerate() {
-            old_idx += new_coords[new_dim] * old_strides[old_dim];
+            old_idx += new_coords[new_dim] * strides[old_dim];
         }
 
         *result_elem = data[old_idx];
     }
 
-    result
+    MaterializedSlice::Scratch(scratch.as_slice())
 }
 
 /// Execute tensor contraction with argmax tracking.
