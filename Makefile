@@ -140,9 +140,10 @@ bench-binary:
 
 bench-network:
 	cargo bench --bench network
+	cargo run --release --example profile_network -- --scenario 3reg_150 --iterations 1 --output benchmarks/data/rust_network_timings.json
 
 bench-julia:
-	cd benchmarks/julia && julia --project=. -e 'using Pkg; Pkg.instantiate()' && julia --project=. generate_timings.jl
+	cd benchmarks/julia && julia --project=. -e 'using Pkg; path=get(ENV, "OMEINSUM_JL_PATH", expanduser("~/.julia/dev/OMEinsum")); Pkg.develop(path=path); Pkg.instantiate()' && julia --project=. generate_timings.jl
 
 bench-compare:
 	python3 benchmarks/compare.py
