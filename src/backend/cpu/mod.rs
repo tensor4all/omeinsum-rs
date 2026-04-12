@@ -20,6 +20,7 @@ pub(crate) struct MatrixLayout<'a, T> {
 }
 
 impl<'a, T> MatrixLayout<'a, T> {
+    #[cfg(test)]
     pub(crate) fn column_major(data: &'a [T], rows: usize, cols: usize) -> Self {
         Self {
             data,
@@ -86,6 +87,14 @@ fn faer_mat_ref<'a, T>(layout: MatrixLayout<'a, T>) -> faer::MatRef<'a, T> {
     }
 }
 
+fn matrix_layout_batch_view<'a, T>(layout: MatrixLayout<'a, T>, batch: usize) -> MatrixLayout<'a, T> {
+    assert!(batch < layout.data.len(), "batch offset must be in bounds");
+    MatrixLayout {
+        data: &layout.data[batch..],
+        ..layout
+    }
+}
+
 impl Cpu {
     pub(crate) fn gemm_standard_layout_internal<A: Algebra>(
         &self,
@@ -126,6 +135,74 @@ impl Cpu {
                 col_stride: b.col_stride,
             };
             let result = faer_gemm_f64_layout(a_f64, b_f64);
+            return Some(unsafe { std::mem::transmute::<Vec<f64>, Vec<A::Scalar>>(result) });
+        }
+
+        None
+    }
+
+    pub(crate) fn gemm_batched_standard_layout_internal<A: Algebra>(
+        &self,
+        batch_size: usize,
+        a: MatrixLayout<'_, A::Scalar>,
+        b: MatrixLayout<'_, A::Scalar>,
+    ) -> Option<Vec<A::Scalar>> {
+        let c_batch_stride = a.rows * b.cols;
+
+        if TypeId::of::<A>() == TypeId::of::<Standard<f32>>() {
+            let a_f32 = MatrixLayout {
+                data: unsafe { std::mem::transmute::<&[A::Scalar], &[f32]>(a.data) },
+                rows: a.rows,
+                cols: a.cols,
+                row_stride: a.row_stride,
+                col_stride: a.col_stride,
+            };
+            let b_f32 = MatrixLayout {
+                data: unsafe { std::mem::transmute::<&[A::Scalar], &[f32]>(b.data) },
+                rows: b.rows,
+                cols: b.cols,
+                row_stride: b.row_stride,
+                col_stride: b.col_stride,
+            };
+            let mut result = vec![0.0f32; batch_size * c_batch_stride];
+
+            for batch in 0..batch_size {
+                let c_offset = batch * c_batch_stride;
+                let c_batch = faer_gemm_f32_layout(
+                    matrix_layout_batch_view(a_f32, batch),
+                    matrix_layout_batch_view(b_f32, batch),
+                );
+                result[c_offset..c_offset + c_batch_stride].copy_from_slice(&c_batch);
+            }
+
+            return Some(unsafe { std::mem::transmute::<Vec<f32>, Vec<A::Scalar>>(result) });
+        }
+        if TypeId::of::<A>() == TypeId::of::<Standard<f64>>() {
+            let a_f64 = MatrixLayout {
+                data: unsafe { std::mem::transmute::<&[A::Scalar], &[f64]>(a.data) },
+                rows: a.rows,
+                cols: a.cols,
+                row_stride: a.row_stride,
+                col_stride: a.col_stride,
+            };
+            let b_f64 = MatrixLayout {
+                data: unsafe { std::mem::transmute::<&[A::Scalar], &[f64]>(b.data) },
+                rows: b.rows,
+                cols: b.cols,
+                row_stride: b.row_stride,
+                col_stride: b.col_stride,
+            };
+            let mut result = vec![0.0f64; batch_size * c_batch_stride];
+
+            for batch in 0..batch_size {
+                let c_offset = batch * c_batch_stride;
+                let c_batch = faer_gemm_f64_layout(
+                    matrix_layout_batch_view(a_f64, batch),
+                    matrix_layout_batch_view(b_f64, batch),
+                );
+                result[c_offset..c_offset + c_batch_stride].copy_from_slice(&c_batch);
+            }
+
             return Some(unsafe { std::mem::transmute::<Vec<f64>, Vec<A::Scalar>>(result) });
         }
 
@@ -829,6 +906,35 @@ mod tests {
 
         let expected = faer_gemm_f32(&a, 2, 2, &[1.0, 3.0, 2.0, 4.0], 2);
         assert_eq!(c, expected);
+    }
+
+    #[test]
+    fn test_gemm_batched_standard_layout_internal_accepts_batch_major_views() {
+        let cpu = Cpu;
+        let a = vec![1.0f32, 5.0, 2.0, 6.0, 3.0, 7.0, 4.0, 8.0];
+        let b = vec![1.0f32, 2.0, 0.0, 0.0, 0.0, 0.0, 1.0, 2.0];
+
+        let c = cpu
+            .gemm_batched_standard_layout_internal::<Standard<f32>>(
+                2,
+                MatrixLayout {
+                    data: &a,
+                    rows: 2,
+                    cols: 2,
+                    row_stride: 2,
+                    col_stride: 4,
+                },
+                MatrixLayout {
+                    data: &b,
+                    rows: 2,
+                    cols: 2,
+                    row_stride: 2,
+                    col_stride: 4,
+                },
+            )
+            .expect("standard layout helper should handle batch-major inputs");
+
+        assert_eq!(c, vec![1.0, 2.0, 3.0, 4.0, 10.0, 12.0, 14.0, 16.0]);
     }
 
     #[cfg(feature = "tropical")]

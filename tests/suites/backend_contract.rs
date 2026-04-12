@@ -67,9 +67,10 @@ fn test_cpu_contract_batched() {
     // bij,bjk->bik (batched matmul)
     let cpu = Cpu;
 
-    // 2 batches of 2x2 matrices
-    let a = vec![1.0f64, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0];
-    let b = vec![1.0, 0.0, 0.0, 1.0, 2.0, 0.0, 0.0, 2.0];
+    // Batch-major storage is column-major with the batch axis first, so the
+    // per-batch matrices are interleaved in memory.
+    let a = vec![1.0f64, 5.0, 2.0, 6.0, 3.0, 7.0, 4.0, 8.0];
+    let b = vec![1.0, 2.0, 0.0, 0.0, 0.0, 0.0, 1.0, 2.0];
 
     let c = cpu.contract::<Standard<f64>>(
         &a,
@@ -84,9 +85,7 @@ fn test_cpu_contract_batched() {
         &[0, 1, 3],
     );
 
-    // Batch 0: identity @ [[1,2],[3,4]] = [[1,2],[3,4]]
-    // Batch 1: 2*identity @ [[5,6],[7,8]] = [[10,12],[14,16]]
-    assert_eq!(c.len(), 8);
+    assert_eq!(c, vec![1.0, 10.0, 2.0, 12.0, 3.0, 14.0, 4.0, 16.0]);
 }
 
 #[cfg(feature = "tropical")]
@@ -273,11 +272,8 @@ fn test_cpu_contract_batched_output_permuted() {
     // bij,bjk->kib (complex permutation)
     let cpu = Cpu;
 
-    // Simple 2x2x2 tensors for easy manual verification
-    // A: batch=2, i=2, j=2
-    let a = vec![1.0f64, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0];
-    // B: batch=2, j=2, k=2 (identity matrices)
-    let b = vec![1.0, 0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 1.0];
+    let a = vec![1.0f64, 5.0, 2.0, 6.0, 3.0, 7.0, 4.0, 8.0];
+    let b = vec![1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 1.0];
 
     // Result should be A with axes permuted to [k, i, b]
     let c = cpu.contract::<Standard<f64>>(
@@ -293,8 +289,7 @@ fn test_cpu_contract_batched_output_permuted() {
         &[3, 1, 0], // k, i, b
     );
 
-    assert_eq!(c.len(), 8);
-    // Since B is identity, result is A with permuted axes
+    assert_eq!(c, vec![1.0, 3.0, 2.0, 4.0, 5.0, 7.0, 6.0, 8.0]);
 }
 
 // ============================================================================

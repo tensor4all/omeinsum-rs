@@ -375,17 +375,41 @@ fn matrix_layout_from_operand<'a, T>(
     }
 }
 
+struct MaterializedMatrixOperand<T> {
+    data: Vec<T>,
+    shape: Vec<usize>,
+    strides: Vec<usize>,
+    modes: Vec<i32>,
+}
+
 fn materialize_matrix_operand<T: Copy + Default>(
     data: &[T],
     shape: &[usize],
     strides: &[usize],
     modes: &[i32],
+    batch_modes: &[i32],
     row_modes: &[i32],
     col_modes: &[i32],
-) -> Vec<T> {
+) -> MaterializedMatrixOperand<T> {
     let contiguous = ensure_contiguous(data, shape, strides);
-    let perm = compute_permutation(modes, row_modes, col_modes, &[]);
-    permute_data(&contiguous, shape, &perm)
+    let perm = compute_permutation(modes, batch_modes, row_modes, col_modes);
+    let target_modes: Vec<i32> = batch_modes
+        .iter()
+        .chain(row_modes.iter())
+        .chain(col_modes.iter())
+        .copied()
+        .collect();
+    let target_shape: Vec<usize> = target_modes
+        .iter()
+        .map(|&mode| shape[mode_position(modes, mode)])
+        .collect();
+
+    MaterializedMatrixOperand {
+        data: permute_data(&contiguous, shape, &perm),
+        strides: compute_contiguous_strides(&target_shape),
+        shape: target_shape,
+        modes: target_modes,
+    }
 }
 
 fn finalize_contraction_output<T: Copy + Default>(
@@ -451,65 +475,76 @@ where
     if left_trace.is_empty() && right_trace.is_empty() {
         let plan =
             analyze_contraction_layout(shape_a, strides_a, modes_a, shape_b, strides_b, modes_b, modes_c);
-        if plan.batch_modes.is_empty() {
-            let left_nocopy = matches!(plan.left_materialization, MaterializationPlan::NoCopy);
-            let right_nocopy = matches!(plan.right_materialization, MaterializationPlan::NoCopy);
-            if left_nocopy || right_nocopy {
-                let left_materialized;
-                let a_layout = if left_nocopy {
-                    matrix_layout_from_operand(
-                        a,
-                        shape_a,
-                        strides_a,
-                        modes_a,
-                        &plan.left_modes,
-                        &plan.contracted_modes,
-                    )
-                } else {
-                    left_materialized = materialize_matrix_operand(
-                        a,
-                        shape_a,
-                        strides_a,
-                        modes_a,
-                        &plan.left_modes,
-                        &plan.contracted_modes,
-                    );
-                    MatrixLayout::column_major(
-                        &left_materialized,
-                        plan.left_size,
-                        plan.contract_size,
-                    )
-                };
+        let left_nocopy = matches!(plan.left_materialization, MaterializationPlan::NoCopy);
+        let right_nocopy = matches!(plan.right_materialization, MaterializationPlan::NoCopy);
+        if left_nocopy || right_nocopy {
+            let left_materialized;
+            let a_layout = if left_nocopy {
+                matrix_layout_from_operand(
+                    a,
+                    shape_a,
+                    strides_a,
+                    modes_a,
+                    &plan.left_modes,
+                    &plan.contracted_modes,
+                )
+            } else {
+                left_materialized = materialize_matrix_operand(
+                    a,
+                    shape_a,
+                    strides_a,
+                    modes_a,
+                    &plan.batch_modes,
+                    &plan.left_modes,
+                    &plan.contracted_modes,
+                );
+                matrix_layout_from_operand(
+                    &left_materialized.data,
+                    &left_materialized.shape,
+                    &left_materialized.strides,
+                    &left_materialized.modes,
+                    &plan.left_modes,
+                    &plan.contracted_modes,
+                )
+            };
 
-                let right_materialized;
-                let b_layout = if right_nocopy {
-                    matrix_layout_from_operand(
-                        b,
-                        shape_b,
-                        strides_b,
-                        modes_b,
-                        &plan.contracted_modes,
-                        &plan.right_modes,
-                    )
-                } else {
-                    right_materialized = materialize_matrix_operand(
-                        b,
-                        shape_b,
-                        strides_b,
-                        modes_b,
-                        &plan.contracted_modes,
-                        &plan.right_modes,
-                    );
-                    MatrixLayout::column_major(
-                        &right_materialized,
-                        plan.contract_size,
-                        plan.right_size,
-                    )
-                };
+            let right_materialized;
+            let b_layout = if right_nocopy {
+                matrix_layout_from_operand(
+                    b,
+                    shape_b,
+                    strides_b,
+                    modes_b,
+                    &plan.contracted_modes,
+                    &plan.right_modes,
+                )
+            } else {
+                right_materialized = materialize_matrix_operand(
+                    b,
+                    shape_b,
+                    strides_b,
+                    modes_b,
+                    &plan.batch_modes,
+                    &plan.contracted_modes,
+                    &plan.right_modes,
+                );
+                matrix_layout_from_operand(
+                    &right_materialized.data,
+                    &right_materialized.shape,
+                    &right_materialized.strides,
+                    &right_materialized.modes,
+                    &plan.contracted_modes,
+                    &plan.right_modes,
+                )
+            };
 
-                if let Some(c_data) = cpu.gemm_standard_layout_internal::<A>(a_layout, b_layout) {
-                    return finalize_contraction_output(c_data, &plan, shape_c, modes_c);
-                }
+            let c_data = if plan.batch_modes.is_empty() {
+                cpu.gemm_standard_layout_internal::<A>(a_layout, b_layout)
+            } else {
+                cpu.gemm_batched_standard_layout_internal::<A>(plan.batch_size, a_layout, b_layout)
+            };
+            if let Some(c_data) = c_data {
+                return finalize_contraction_output(c_data, &plan, shape_c, modes_c);
             }
         }
     }
@@ -843,5 +878,23 @@ mod tests {
             plan.right_materialization,
             MaterializationPlan::Permute { .. }
         ));
+    }
+
+    #[test]
+    fn test_analyze_contraction_layout_preserves_batch_tail() {
+        let plan = analyze_contraction_layout(
+            &[2, 2, 2],
+            &[1, 2, 4],
+            &[0, 1, 2],
+            &[2, 2, 2],
+            &[1, 2, 4],
+            &[0, 2, 3],
+            &[0, 1, 3],
+        );
+
+        assert_eq!(plan.batch_modes, vec![0]);
+        assert_eq!(plan.batch_size, 2);
+        assert!(matches!(plan.left_materialization, MaterializationPlan::NoCopy));
+        assert!(matches!(plan.right_materialization, MaterializationPlan::NoCopy));
     }
 }
