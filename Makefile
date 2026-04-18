@@ -2,8 +2,13 @@
 # Automates environment setup, testing, documentation, and examples
 
 NON_GPU_FEATURES := tropical parallel
+BENCH_SCENARIO ?= all
+BENCH_ITERATIONS ?= 40
+BENCH_WARMUP ?= 5
+BENCH_DIM ?= 128
+BENCH_BATCH ?= 24
 
-.PHONY: all build build-debug cargo-check check test test-gpu test-release bench docs clean help
+.PHONY: all build build-debug cargo-check check test test-gpu test-release bench bench-binary bench-network bench-cpu-contract bench-julia bench-compare docs clean help
 .PHONY: setup setup-rust
 .PHONY: docs-build docs-serve docs-book docs-book-serve
 .PHONY: fmt fmt-check clippy lint coverage
@@ -40,7 +45,14 @@ help:
 	@echo "  test-release   - Run tests in release mode (non-GPU features)"
 	@echo ""
 	@echo "Benchmark targets:"
-	@echo "  bench          - Run benchmarks"
+	@echo "  bench          - Run all Rust benchmarks"
+	@echo "  bench-binary   - Run binary contraction benchmarks"
+	@echo "  bench-network  - Run tensor-network benchmarks"
+	@echo "  bench-cpu-contract - Run the CPU contraction benchmark example"
+	@echo "                   Override BENCH_SCENARIO, BENCH_ITERATIONS, BENCH_WARMUP,"
+	@echo "                   BENCH_DIM, or BENCH_BATCH to tune the run"
+	@echo "  bench-julia    - Run Julia benchmarks in benchmarks/julia/"
+	@echo "  bench-compare  - Compare Rust vs Julia benchmark timings"
 	@echo ""
 	@echo "Example targets:"
 	@echo "  example-basic     - Run basic einsum example"
@@ -126,9 +138,28 @@ test-release:
 #==============================================================================
 
 bench:
-	@echo "Running benchmarks..."
-	cargo bench
-	@echo "Benchmarks complete."
+	@echo "Running all Rust benchmarks..."
+	$(MAKE) bench-binary
+	$(MAKE) bench-network
+	@echo "All Rust benchmarks complete. Results in target/criterion/"
+
+bench-binary:
+	cargo bench --bench binary
+
+bench-network:
+	cargo bench --bench network
+	cargo run --release --example profile_network -- --scenario 3reg_150 --iterations 1 --output benchmarks/data/rust_network_timings.json
+
+bench-cpu-contract:
+	@echo "Running CPU contraction benchmarks..."
+	cargo run --release --example cpu_contract_bench -- --scenario "$(BENCH_SCENARIO)" --iterations "$(BENCH_ITERATIONS)" --warmup "$(BENCH_WARMUP)" --dim "$(BENCH_DIM)" --batch "$(BENCH_BATCH)"
+	@echo "CPU contraction benchmarks complete."
+
+bench-julia:
+	cd benchmarks/julia && julia --project=. -e 'using Pkg; omeinsum_path=get(ENV, "OMEINSUM_JL_PATH", expanduser("~/.julia/dev/OMEinsum")); orders_path=get(ENV, "OMEINSUM_CONTRACTION_ORDERS_JL_PATH", expanduser("~/.julia/dev/OMEinsumContractionOrders")); Pkg.develop(path=orders_path); Pkg.develop(path=omeinsum_path); Pkg.instantiate()' && julia --project=. generate_timings.jl
+
+bench-compare:
+	python3 benchmarks/compare.py
 
 #==============================================================================
 # Examples

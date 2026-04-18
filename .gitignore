@@ -24,6 +24,8 @@ Thumbs.db
 tarpaulin-report.html
 cobertura.xml
 *.profraw
+perf.data
+profile.json.gz
 
 # Documentation
 /docs/book/
@@ -40,3 +42,5 @@ build/
 docs/superpowers/
 docs/test-reports/
 *.log
+benchmarks/data/*.json
+!benchmarks/data/.gitkeep

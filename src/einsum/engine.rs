@@ -109,6 +109,11 @@ impl<L: Label> Einsum<L> {
     }
 }
 
+struct OrderedTensor<T: Scalar, B: Backend> {
+    tensor: Tensor<T, B>,
+    indices: Vec<usize>,
+}
+
 impl Einsum<usize> {
     /// Execute the einsum contraction.
     ///
@@ -150,14 +155,9 @@ impl Einsum<usize> {
                         emit_final_root_output.then_some(self.iy.as_slice()),
                     );
                     if emit_final_root_output {
-                        result
+                        result.tensor
                     } else {
-                        finalize_optimized_result::<A, T, B>(
-                            result,
-                            tree,
-                            &self.iy,
-                            &self.size_dict,
-                        )
+                        finalize_ordered_result::<A, T, B>(result, &self.iy, &self.size_dict)
                     }
                 }
             }
@@ -394,28 +394,34 @@ impl Einsum<usize> {
         tree: &NestedEinsum<usize>,
         tensors: &[&Tensor<T, B>],
         preferred_output_indices: Option<&[usize]>,
-    ) -> Tensor<T, B>
+    ) -> OrderedTensor<T, B>
     where
         A: Algebra<Scalar = T, Index = u32>,
         T: Scalar + BackendScalar<B>,
         B: Backend,
     {
         match tree {
-            NestedEinsum::Leaf { tensor_index } => tensors[*tensor_index].clone(),
+            NestedEinsum::Leaf { tensor_index } => OrderedTensor {
+                tensor: tensors[*tensor_index].clone(),
+                indices: self.ixs[*tensor_index].clone(),
+            },
             NestedEinsum::Node { args, eins } => {
                 assert_eq!(args.len(), 2, "Expected binary contraction tree");
 
                 let left = self.execute_tree::<A, T, B>(&args[0], tensors, None);
                 let right = self.execute_tree::<A, T, B>(&args[1], tensors, None);
 
-                let ia = &eins.ixs[0];
-                let ib = &eins.ixs[1];
                 let iy = &eins.iy;
-                let (left, ia) =
-                    normalize_binary_operand::<A, T, B>(&left, ia, ib, iy, &self.size_dict);
+                let (left_tensor, ia) = normalize_binary_operand::<A, T, B>(
+                    &left.tensor,
+                    &left.indices,
+                    &right.indices,
+                    iy,
+                    &self.size_dict,
+                );
                 let (right, ib) = normalize_binary_operand::<A, T, B>(
-                    &right,
-                    ib,
+                    &right.tensor,
+                    &right.indices,
                     ia.as_slice(),
                     iy,
                     &self.size_dict,
@@ -425,9 +431,15 @@ impl Einsum<usize> {
                     let options = BinaryContractOptions {
                         preferred_output_indices: Some(preferred_output_indices.to_vec()),
                     };
-                    left.contract_binary_with_options::<A>(&right, &ia, &ib, iy, &options)
+                    OrderedTensor {
+                        tensor: left_tensor
+                            .contract_binary_with_options::<A>(&right, &ia, &ib, iy, &options),
+                        indices: preferred_output_indices.to_vec(),
+                    }
                 } else {
-                    left.contract_binary::<A>(&right, &ia, &ib, iy)
+                    let (tensor, indices) =
+                        left_tensor.contract_binary_native_order::<A>(&right, &ia, &ib, iy);
+                    OrderedTensor { tensor, indices }
                 }
             }
         }
@@ -586,9 +598,39 @@ fn can_emit_final_root_output(tree_output: &[usize], final_output: &[usize]) -> 
         && tree_set == final_set
 }
 
-fn finalize_optimized_result<A, T, B>(
-    result: Tensor<T, B>,
-    tree: &NestedEinsum<usize>,
+fn permute_tensor_to_indices<T, B>(
+    tensor: &Tensor<T, B>,
+    current_indices: &[usize],
+    target_indices: &[usize],
+) -> Tensor<T, B>
+where
+    T: Scalar,
+    B: Backend,
+{
+    assert_eq!(
+        current_indices.len(),
+        target_indices.len(),
+        "current and target index orders must have the same length"
+    );
+
+    if current_indices == target_indices {
+        return tensor.clone();
+    }
+
+    let axes: Vec<usize> = target_indices
+        .iter()
+        .map(|target| {
+            current_indices
+                .iter()
+                .position(|current| current == target)
+                .expect("target index must exist in current tensor indices")
+        })
+        .collect();
+    tensor.permute(&axes)
+}
+
+fn finalize_ordered_result<A, T, B>(
+    result: OrderedTensor<T, B>,
     expected_output: &[usize],
     size_dict: &HashMap<usize, usize>,
 ) -> Tensor<T, B>
@@ -597,11 +639,12 @@ where
     T: Scalar,
     B: Backend,
 {
-    let tree_output = optimized_tree_output(tree);
-    if tree_output == expected_output {
-        result
+    if result.indices == expected_output {
+        result.tensor
+    } else if can_emit_final_root_output(&result.indices, expected_output) {
+        permute_tensor_to_indices(&result.tensor, &result.indices, expected_output)
     } else {
-        execute_unary_naive::<A, T, B>(&result, tree_output, expected_output, size_dict)
+        execute_unary_naive::<A, T, B>(&result.tensor, &result.indices, expected_output, size_dict)
     }
 }
 
@@ -1075,6 +1118,55 @@ mod tests {
         let final_output = vec![0, 0, 2];
 
         assert!(!can_emit_final_root_output(&tree_output, &final_output));
+    }
+
+    #[test]
+    fn test_permute_tensor_to_indices_builds_zero_copy_view() {
+        let data: Vec<f32> = (0..24).map(|value| value as f32).collect();
+        let tensor = Tensor::<f32, Cpu>::from_data(&data, &[4, 2, 3]);
+
+        let reordered = permute_tensor_to_indices(&tensor, &[2, 0, 1], &[0, 1, 2]);
+
+        assert_eq!(reordered.shape(), &[2, 3, 4]);
+        assert_eq!(reordered.strides(), &[4, 8, 1]);
+        assert!(!reordered.is_contiguous());
+        assert_eq!(reordered.get(6), data[1]);
+    }
+
+    #[test]
+    fn test_permute_tensor_to_indices_keeps_identity_layout() {
+        let data: Vec<f32> = (0..24).map(|value| value as f32).collect();
+        let tensor = Tensor::<f32, Cpu>::from_data(&data, &[2, 3, 4]);
+
+        let reordered = permute_tensor_to_indices(&tensor, &[0, 1, 2], &[0, 1, 2]);
+
+        assert_eq!(reordered.shape(), tensor.shape());
+        assert_eq!(reordered.strides(), tensor.strides());
+        assert!(reordered.is_contiguous());
+        assert_eq!(reordered.to_vec(), tensor.to_vec());
+    }
+
+    #[test]
+    fn test_execute_tree_tracks_native_binary_output_order() {
+        let a =
+            Tensor::<f32, Cpu>::from_data(&[1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0], &[2, 2, 2]);
+        let b =
+            Tensor::<f32, Cpu>::from_data(&[1.0, 2.0, 3.0, 4.0, 1.0, 0.0, 0.0, 1.0], &[2, 2, 2]);
+        let sizes: HashMap<usize, usize> = [(0, 2), (1, 2), (2, 2), (3, 2)].into();
+        let ein = Einsum::new(vec![vec![0, 1, 2], vec![0, 2, 3]], vec![0, 1, 3], sizes);
+        let tree = NestedEinsum::node(
+            vec![NestedEinsum::leaf(0), NestedEinsum::leaf(1)],
+            EinCode::new(vec![vec![0, 1, 2], vec![0, 2, 3]], vec![0, 1, 3]),
+        );
+
+        let ordered = ein.execute_tree::<Standard<f32>, f32, Cpu>(&tree, &[&a, &b], None);
+        let finalized = ein.execute::<Standard<f32>, f32, Cpu>(&[&a, &b]);
+
+        assert_eq!(ordered.indices, vec![1, 3, 0]);
+        assert_eq!(
+            permute_tensor_to_indices(&ordered.tensor, &ordered.indices, &[0, 1, 3]).to_vec(),
+            finalized.to_vec()
+        );
     }
 
     #[test]

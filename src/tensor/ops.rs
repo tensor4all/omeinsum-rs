@@ -9,6 +9,31 @@ pub(crate) struct BinaryContractOptions {
     pub preferred_output_indices: Option<Vec<usize>>,
 }
 
+pub(crate) fn native_binary_output_indices(ia: &[usize], ib: &[usize], iy: &[usize]) -> Vec<usize> {
+    let output_set: std::collections::HashSet<usize> = iy.iter().copied().collect();
+    let ia_set: std::collections::HashSet<usize> = ia.iter().copied().collect();
+    let ib_set: std::collections::HashSet<usize> = ib.iter().copied().collect();
+    let mut native = Vec::with_capacity(iy.len());
+
+    for &idx in ia {
+        if output_set.contains(&idx) && !ib_set.contains(&idx) && !native.contains(&idx) {
+            native.push(idx);
+        }
+    }
+    for &idx in ib {
+        if output_set.contains(&idx) && !ia_set.contains(&idx) && !native.contains(&idx) {
+            native.push(idx);
+        }
+    }
+    for &idx in ia {
+        if output_set.contains(&idx) && ib_set.contains(&idx) && !native.contains(&idx) {
+            native.push(idx);
+        }
+    }
+
+    native
+}
+
 /// Compute output shape from input shapes and modes.
 fn compute_output_shape(
     shape_a: &[usize],
@@ -92,6 +117,29 @@ impl<T: Scalar, B: Backend> Tensor<T, B> {
         let (result, _) =
             self.contract_binary_impl_with_options::<A>(other, ia, ib, iy, false, options);
         result
+    }
+
+    pub(crate) fn contract_binary_native_order<A: Algebra<Scalar = T, Index = u32>>(
+        &self,
+        other: &Self,
+        ia: &[usize],
+        ib: &[usize],
+        iy: &[usize],
+    ) -> (Self, Vec<usize>)
+    where
+        T: BackendScalar<B>,
+    {
+        let mut output_indices = native_binary_output_indices(ia, ib, iy);
+        if output_indices.len() != iy.len() {
+            output_indices = iy.to_vec();
+        }
+        let options = BinaryContractOptions {
+            preferred_output_indices: Some(output_indices.clone()),
+        };
+        (
+            self.contract_binary_with_options::<A>(other, ia, ib, iy, &options),
+            output_indices,
+        )
     }
 
     pub(crate) fn contract_binary_with_argmax_with_options<A: Algebra<Scalar = T, Index = u32>>(
@@ -270,5 +318,25 @@ mod tests {
         // Batch 0 result: [[16,1],[24,3]], Batch 1 result: [[28,6],[40,8]]
         // Column-major output: [16, 28, 24, 40, 1, 6, 3, 8]
         assert_eq!(c.to_vec(), vec![16.0, 28.0, 24.0, 40.0, 1.0, 6.0, 3.0, 8.0]);
+    }
+
+    #[test]
+    fn test_contract_binary_native_order_returns_backend_order() {
+        // A[b,i,j] x B[b,j,k] -> C[b,i,k].
+        // The CPU backend naturally emits [i,k,b], which avoids a materializing
+        // output permutation when this is only an intermediate contraction.
+        let a =
+            Tensor::<f32, Cpu>::from_data(&[1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0], &[2, 2, 2]);
+        let b =
+            Tensor::<f32, Cpu>::from_data(&[1.0, 2.0, 3.0, 4.0, 1.0, 0.0, 0.0, 1.0], &[2, 2, 2]);
+
+        let final_order =
+            a.contract_binary::<Standard<f32>>(&b, &[0, 1, 2], &[0, 2, 3], &[0, 1, 3]);
+        let (native, native_indices) =
+            a.contract_binary_native_order::<Standard<f32>>(&b, &[0, 1, 2], &[0, 2, 3], &[0, 1, 3]);
+
+        assert_eq!(native_indices, vec![1, 3, 0]);
+        assert_eq!(native.shape(), &[2, 2, 2]);
+        assert_eq!(native.permute(&[2, 0, 1]).to_vec(), final_order.to_vec());
     }
 }

@@ -722,23 +722,26 @@ fn materialize_with_permutation_into<'a, T: Copy + Default>(
     let numel: usize = shape.iter().product();
     scratch.resize(numel, T::default());
     let new_shape: Vec<usize> = perm.iter().map(|&p| shape[p]).collect();
+    let mut coords = vec![0usize; new_shape.len()];
+    let last_axis = new_shape.len().saturating_sub(1);
+    let mut old_idx = 0usize;
 
-    for (new_idx, result_elem) in scratch.iter_mut().enumerate().take(numel) {
-        // Convert new linear index to new multi-index
-        let mut remaining = new_idx;
-        let mut new_coords = vec![0; shape.len()];
-        for dim in 0..new_shape.len() {
-            new_coords[dim] = remaining % new_shape[dim];
-            remaining /= new_shape[dim];
-        }
-
-        // Map to old coordinates via inverse permutation
-        let mut old_idx = 0;
-        for (new_dim, &old_dim) in perm.iter().enumerate() {
-            old_idx += new_coords[new_dim] * strides[old_dim];
-        }
-
+    for result_elem in scratch.iter_mut().take(numel) {
         *result_elem = data[old_idx];
+
+        for axis in 0..new_shape.len() {
+            coords[axis] += 1;
+            old_idx += strides[perm[axis]];
+            if coords[axis] < new_shape[axis] {
+                break;
+            }
+
+            coords[axis] = 0;
+            old_idx -= strides[perm[axis]] * new_shape[axis];
+            if axis == last_axis {
+                break;
+            }
+        }
     }
 
     MaterializedSlice::Scratch(scratch.as_slice())
@@ -857,6 +860,7 @@ where
 
 #[cfg(test)]
 mod tests {
+    use super::super::allocation_counting::with_allocation_counting;
     use super::*;
 
     #[test]
@@ -968,5 +972,26 @@ mod tests {
             plan.right_materialization,
             MaterializationPlan::NoCopy
         ));
+    }
+
+    #[test]
+    fn test_materialize_with_permutation_does_not_allocate_per_element() {
+        let data: Vec<u32> = (0..64).collect();
+        let shape = [2, 2, 2, 2, 2, 2];
+        let strides = [1, 2, 4, 8, 16, 32];
+        let perm = [5, 3, 1, 4, 2, 0];
+        let mut scratch = Vec::with_capacity(data.len());
+
+        let (len, allocations) = with_allocation_counting(|| {
+            materialize_with_permutation_into(&data, &shape, &strides, &perm, &mut scratch)
+                .as_slice()
+                .len()
+        });
+
+        assert_eq!(len, data.len());
+        assert!(
+            allocations <= 4,
+            "expected a bounded number of allocations, got {allocations}"
+        );
     }
 }
