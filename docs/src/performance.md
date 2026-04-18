@@ -40,18 +40,18 @@ let bad = t.permute(&[1, 0]).contiguous();  // Only if needed
 
 ## Parallelization
 
-Enable the `parallel` feature (default):
+Enable the optional `parallel` feature for workloads that benefit from Rayon:
 
 ```toml
 [dependencies]
-omeinsum = "0.1"  # parallel enabled by default
+omeinsum = { version = "0.1", features = ["parallel"] }
 ```
 
-Disable for single-threaded workloads:
+Omit the feature for single-threaded workloads:
 
 ```toml
 [dependencies]
-omeinsum = { version = "0.1", default-features = false }
+omeinsum = "0.1"
 ```
 
 ## Data Types
@@ -72,17 +72,27 @@ let t = Tensor::<f64, Cpu>::from_data(&data, &shape);
 
 ## Benchmarking
 
-Use release mode for benchmarks:
+Use the built-in CPU benchmark example in release mode:
 
 ```bash
-cargo run --release --example basic_einsum
+make bench-cpu-contract
 ```
 
-Profile with:
+Tune the benchmark mix or problem size with make variables:
 
 ```bash
-cargo build --release
-perf record ./target/release/examples/basic_einsum
+make bench-cpu-contract BENCH_SCENARIO=rhs-transpose-view BENCH_DIM=192 BENCH_ITERATIONS=60
+make bench-cpu-contract BENCH_SCENARIO=batch-major-batched BENCH_BATCH=32 BENCH_DIM=128
+make bench-cpu-contract BENCH_SCENARIO=root-output-permutation BENCH_DIM=160
+```
+
+To compare two revisions, run the same benchmark command in both checkouts and compare the reported `avg_ms` values.
+
+Profile the benchmark example with:
+
+```bash
+cargo build --release --example cpu_contract_bench
+perf record ./target/release/examples/cpu_contract_bench --scenario all
 perf report
 ```
 
@@ -117,10 +127,10 @@ Debug builds are ~10-50x slower:
 
 ```bash
 # Bad: debug mode
-cargo run --example benchmark
+cargo run --example cpu_contract_bench -- --scenario all
 
 # Good: release mode
-cargo run --release --example benchmark
+cargo run --release --example cpu_contract_bench -- --scenario all
 ```
 
 ## Future Optimizations
@@ -128,5 +138,4 @@ cargo run --release --example benchmark
 Planned performance improvements:
 - CUDA backend for GPU acceleration
 - Optimized tropical-gemm kernel integration
-- Batched GEMM support
 - Cache-aware blocking
