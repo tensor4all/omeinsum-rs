@@ -860,61 +860,8 @@ where
 
 #[cfg(test)]
 mod tests {
+    use super::super::allocation_counting::with_allocation_counting;
     use super::*;
-    use std::alloc::{GlobalAlloc, Layout, System};
-    use std::cell::Cell;
-    use std::sync::atomic::{AtomicUsize, Ordering};
-
-    struct CountingAllocator;
-
-    static ALLOCATION_COUNT: AtomicUsize = AtomicUsize::new(0);
-    thread_local! {
-        static COUNT_ALLOCATIONS: Cell<bool> = const { Cell::new(false) };
-    }
-
-    unsafe impl GlobalAlloc for CountingAllocator {
-        unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-            COUNT_ALLOCATIONS.with(|active| {
-                if active.get() {
-                    ALLOCATION_COUNT.fetch_add(1, Ordering::Relaxed);
-                }
-            });
-            unsafe { System.alloc(layout) }
-        }
-
-        unsafe fn alloc_zeroed(&self, layout: Layout) -> *mut u8 {
-            COUNT_ALLOCATIONS.with(|active| {
-                if active.get() {
-                    ALLOCATION_COUNT.fetch_add(1, Ordering::Relaxed);
-                }
-            });
-            unsafe { System.alloc_zeroed(layout) }
-        }
-
-        unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
-            unsafe { System.dealloc(ptr, layout) }
-        }
-
-        unsafe fn realloc(&self, ptr: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
-            COUNT_ALLOCATIONS.with(|active| {
-                if active.get() {
-                    ALLOCATION_COUNT.fetch_add(1, Ordering::Relaxed);
-                }
-            });
-            unsafe { System.realloc(ptr, layout, new_size) }
-        }
-    }
-
-    #[global_allocator]
-    static TEST_ALLOCATOR: CountingAllocator = CountingAllocator;
-
-    fn with_allocation_counting<T>(f: impl FnOnce() -> T) -> (T, usize) {
-        ALLOCATION_COUNT.store(0, Ordering::Relaxed);
-        COUNT_ALLOCATIONS.with(|active| active.set(true));
-        let result = f();
-        COUNT_ALLOCATIONS.with(|active| active.set(false));
-        (result, ALLOCATION_COUNT.load(Ordering::Relaxed))
-    }
 
     #[test]
     fn test_classify_modes_matmul() {

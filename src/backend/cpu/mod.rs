@@ -112,6 +112,66 @@ fn should_use_standard_batched_gemm(batch_size: usize, m: usize, k: usize, n: us
         && m.saturating_mul(k).saturating_mul(n) >= STANDARD_BATCHED_FAER_MIN_OPS_PER_BATCH
 }
 
+#[cfg(test)]
+mod allocation_counting {
+    use std::alloc::{GlobalAlloc, Layout, System};
+    use std::cell::Cell;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    pub(crate) struct CountingAllocator;
+
+    static ALLOCATION_COUNT: AtomicUsize = AtomicUsize::new(0);
+    thread_local! {
+        static COUNT_ALLOCATIONS: Cell<bool> = const { Cell::new(false) };
+    }
+
+    unsafe impl GlobalAlloc for CountingAllocator {
+        unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+            COUNT_ALLOCATIONS.with(|active| {
+                if active.get() {
+                    ALLOCATION_COUNT.fetch_add(1, Ordering::Relaxed);
+                }
+            });
+            unsafe { System.alloc(layout) }
+        }
+
+        unsafe fn alloc_zeroed(&self, layout: Layout) -> *mut u8 {
+            COUNT_ALLOCATIONS.with(|active| {
+                if active.get() {
+                    ALLOCATION_COUNT.fetch_add(1, Ordering::Relaxed);
+                }
+            });
+            unsafe { System.alloc_zeroed(layout) }
+        }
+
+        unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
+            unsafe { System.dealloc(ptr, layout) }
+        }
+
+        unsafe fn realloc(&self, ptr: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
+            COUNT_ALLOCATIONS.with(|active| {
+                if active.get() {
+                    ALLOCATION_COUNT.fetch_add(1, Ordering::Relaxed);
+                }
+            });
+            unsafe { System.realloc(ptr, layout, new_size) }
+        }
+    }
+
+    pub(crate) fn with_allocation_counting<T>(f: impl FnOnce() -> T) -> (T, usize) {
+        ALLOCATION_COUNT.store(0, Ordering::Relaxed);
+        COUNT_ALLOCATIONS.with(|active| active.set(true));
+        let result = f();
+        COUNT_ALLOCATIONS.with(|active| active.set(false));
+        (result, ALLOCATION_COUNT.load(Ordering::Relaxed))
+    }
+}
+
+#[cfg(test)]
+#[global_allocator]
+static TEST_ALLOCATOR: allocation_counting::CountingAllocator =
+    allocation_counting::CountingAllocator;
+
 impl Cpu {
     pub(crate) fn gemm_standard_layout_internal<A: Algebra>(
         &self,
@@ -589,12 +649,13 @@ fn faer_gemm_f32_layout(a: MatrixLayout<'_, f32>, b: MatrixLayout<'_, f32>) -> V
 }
 
 fn faer_gemm_f32_layout_into(a: MatrixLayout<'_, f32>, b: MatrixLayout<'_, f32>, c: &mut [f32]) {
-    use faer::{linalg::matmul::matmul, Accum, Mat, Par};
+    use faer::{linalg::matmul::matmul, Accum, MatMut, Par};
 
     assert_eq!(c.len(), a.rows * b.cols);
     let a_mat = faer_mat_ref(a);
     let b_mat = faer_mat_ref(b);
-    let mut c_mat = Mat::<f32>::zeros(a.rows, b.cols);
+    let mut c_mat =
+        unsafe { MatMut::from_raw_parts_mut(c.as_mut_ptr(), a.rows, b.cols, 1, a.rows as isize) };
     matmul(
         c_mat.as_mut(),
         Accum::Replace,
@@ -603,12 +664,6 @@ fn faer_gemm_f32_layout_into(a: MatrixLayout<'_, f32>, b: MatrixLayout<'_, f32>,
         1.0f32,
         Par::Seq,
     );
-
-    for j in 0..b.cols {
-        for i in 0..a.rows {
-            c[j * a.rows + i] = c_mat[(i, j)];
-        }
-    }
 }
 
 /// GEMM using faer for f64 (column-major layout).
@@ -636,12 +691,13 @@ fn faer_gemm_f64_layout(a: MatrixLayout<'_, f64>, b: MatrixLayout<'_, f64>) -> V
 }
 
 fn faer_gemm_f64_layout_into(a: MatrixLayout<'_, f64>, b: MatrixLayout<'_, f64>, c: &mut [f64]) {
-    use faer::{linalg::matmul::matmul, Accum, Mat, Par};
+    use faer::{linalg::matmul::matmul, Accum, MatMut, Par};
 
     assert_eq!(c.len(), a.rows * b.cols);
     let a_mat = faer_mat_ref(a);
     let b_mat = faer_mat_ref(b);
-    let mut c_mat = Mat::<f64>::zeros(a.rows, b.cols);
+    let mut c_mat =
+        unsafe { MatMut::from_raw_parts_mut(c.as_mut_ptr(), a.rows, b.cols, 1, a.rows as isize) };
     matmul(
         c_mat.as_mut(),
         Accum::Replace,
@@ -650,12 +706,6 @@ fn faer_gemm_f64_layout_into(a: MatrixLayout<'_, f64>, b: MatrixLayout<'_, f64>,
         1.0f64,
         Par::Seq,
     );
-
-    for j in 0..b.cols {
-        for i in 0..a.rows {
-            c[j * a.rows + i] = c_mat[(i, j)];
-        }
-    }
 }
 
 fn standard_batched_gemm_f32(
@@ -1110,6 +1160,62 @@ mod tests {
 
         let expected = faer_gemm_f32(&a, 2, 2, &[1.0, 3.0, 2.0, 4.0], 2);
         assert_eq!(c, expected);
+    }
+
+    #[test]
+    fn test_faer_layout_gemm_into_writes_output_without_allocating_temporary() {
+        let a = vec![1.0f32, 2.0, 3.0, 4.0];
+        let b = vec![1.0f32, 2.0, 3.0, 4.0];
+        let mut c = vec![0.0f32; 4];
+
+        faer_gemm_f32_layout_into(
+            MatrixLayout::column_major(&a, 2, 2),
+            MatrixLayout::column_major(&b, 2, 2),
+            &mut c,
+        );
+        c.fill(-1.0);
+
+        let ((), allocations) = allocation_counting::with_allocation_counting(|| {
+            faer_gemm_f32_layout_into(
+                MatrixLayout::column_major(&a, 2, 2),
+                MatrixLayout::column_major(&b, 2, 2),
+                &mut c,
+            );
+        });
+
+        assert_eq!(c, vec![7.0, 10.0, 15.0, 22.0]);
+        assert_eq!(
+            allocations, 0,
+            "faer_gemm_f32_layout_into should write into the provided output slice"
+        );
+    }
+
+    #[test]
+    fn test_faer_layout_gemm_f64_into_writes_output_without_allocating_temporary() {
+        let a = vec![1.0f64, 2.0, 3.0, 4.0];
+        let b = vec![1.0f64, 2.0, 3.0, 4.0];
+        let mut c = vec![0.0f64; 4];
+
+        faer_gemm_f64_layout_into(
+            MatrixLayout::column_major(&a, 2, 2),
+            MatrixLayout::column_major(&b, 2, 2),
+            &mut c,
+        );
+        c.fill(-1.0);
+
+        let ((), allocations) = allocation_counting::with_allocation_counting(|| {
+            faer_gemm_f64_layout_into(
+                MatrixLayout::column_major(&a, 2, 2),
+                MatrixLayout::column_major(&b, 2, 2),
+                &mut c,
+            );
+        });
+
+        assert_eq!(c, vec![7.0, 10.0, 15.0, 22.0]);
+        assert_eq!(
+            allocations, 0,
+            "faer_gemm_f64_layout_into should write into the provided output slice"
+        );
     }
 
     #[test]
