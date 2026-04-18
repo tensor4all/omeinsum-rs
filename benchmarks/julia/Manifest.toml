@@ -2,7 +2,7 @@
 
 julia_version = "1.12.3"
 manifest_format = "2.0"
-project_hash = "790053d076e9042c56538cf8ea2cd45361770a70"
+project_hash = "29319ff2fafa6aa32c434f3c14f5fff0222b0994"
 
 [[deps.AbstractTrees]]
 git-tree-sha1 = "2d9c9a55f9c93e8887ad391fbae72f8ef55e1177"
@@ -253,7 +253,7 @@ version = "1.11.0"
 deps = ["AbstractTrees", "BatchedRoutines", "ChainRulesCore", "Combinatorics", "LinearAlgebra", "MacroTools", "OMEinsumContractionOrders", "Test", "TupleTools"]
 path = "/Users/liujinguo/.julia/dev/OMEinsum"
 uuid = "ebe7aa44-baf0-506c-a96f-8464559b3922"
-version = "0.9.3"
+version = "0.9.4"
 
     [deps.OMEinsum.extensions]
     AMDGPUExt = "AMDGPU"
@@ -267,7 +267,7 @@ version = "0.9.3"
 
 [[deps.OMEinsumContractionOrders]]
 deps = ["AbstractTrees", "CliqueTrees", "DataStructures", "JSON", "SparseArrays", "StatsBase", "Suppressor", "TreeWidthSolver"]
-path = "../../../../../Users/liujinguo/.julia/dev/OMEinsumContractionOrders"
+path = "/Users/liujinguo/.julia/dev/OMEinsumContractionOrders"
 uuid = "6f22d1fd-8eed-4bb7-9776-e7d684900715"
 version = "1.2.2"
 

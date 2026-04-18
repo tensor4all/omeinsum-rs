@@ -2,7 +2,10 @@
 
 using BenchmarkTools
 using JSON
+using LinearAlgebra
 using OMEinsum
+
+BLAS.set_num_threads(1)
 
 const ROOT = normpath(joinpath(@__DIR__, "..", ".."))
 const DATA_DIR = joinpath(ROOT, "benchmarks", "data")
