@@ -44,3 +44,4 @@ docs/test-reports/
 *.log
 benchmarks/data/*.json
 !benchmarks/data/.gitkeep
+docs/plans/
