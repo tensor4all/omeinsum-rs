@@ -65,7 +65,8 @@ make release V=x.y.z
 ```
 
 The target:
-- updates `Cargo.toml`, `omeinsum-cli/Cargo.toml`, and `Cargo.lock`
+- updates `Cargo.toml` and `omeinsum-cli/Cargo.toml`
+- stages `Cargo.lock` only if this repo starts tracking it
 - commits version changes only when needed
 - creates and pushes `vX.Y.Z`
 - creates a GitHub Release, which triggers the release workflow

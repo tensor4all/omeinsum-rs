@@ -260,7 +260,10 @@ endif
 	fi
 	$(SED_I) 's/^version = ".*"/version = "$(V)"/' Cargo.toml omeinsum-cli/Cargo.toml
 	cargo check
-	git add Cargo.toml omeinsum-cli/Cargo.toml Cargo.lock
+	git add Cargo.toml omeinsum-cli/Cargo.toml
+	@if git ls-files --error-unmatch Cargo.lock >/dev/null 2>&1; then \
+		git add Cargo.lock; \
+	fi
 	@if ! git diff --cached --quiet; then \
 		git commit -m "release: v$(V)"; \
 	else \
