@@ -68,7 +68,7 @@ pub mod tensor;
 pub(crate) mod test_support;
 
 // Re-exports
-pub use algebra::{Algebra, Complex32, Complex64, Semiring, Standard};
+pub use algebra::{Algebra, Complex32, Complex64, GenericSemiring, Semiring, Standard};
 pub use backend::{Backend, BackendScalar, Cpu, Storage};
 pub use einsum::{cost_and_gradient, einsum, einsum_with_grad, EinBuilder, Einsum};
 pub use tensor::{Tensor, TensorView};
