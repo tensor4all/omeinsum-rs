@@ -2,7 +2,7 @@
 //! Run with: cargo test --test tropical --features tropical
 
 use omeinsum::backend::Cpu;
-use omeinsum::{einsum, GenericSemiring, MaxMul, MaxPlus, MinPlus, Tensor};
+use omeinsum::{einsum, MaxMul, MaxPlus, MinPlus, Tensor};
 
 #[test]
 fn test_maxplus_associativity() {
@@ -132,7 +132,7 @@ fn test_tropical_distributivity() {
     let b = MaxPlus(5.0f32);
     let c = MaxPlus(3.0f32);
 
-    use omeinsum::algebra::Semiring;
+    use omeinsum::algebra::{GenericSemiring, Semiring};
 
     // Left: (max(a, b)) + c
     let left = a.add(b).mul(c);
@@ -206,7 +206,7 @@ fn test_minplus_bellman_ford_step() {
 
 #[test]
 fn test_tropical_zeros_and_ones() {
-    use omeinsum::algebra::Semiring;
+    use omeinsum::algebra::{GenericSemiring, Semiring};
 
     // MaxPlus zero is -inf, one is 0
     let maxplus_zero = MaxPlus::<f32>::zero();
@@ -230,7 +230,7 @@ fn test_tropical_zeros_and_ones() {
 #[test]
 fn test_tropical_idempotent_addition() {
     // Test idempotency of tropical addition: a + a = a
-    use omeinsum::algebra::Semiring;
+    use omeinsum::algebra::{GenericSemiring, Semiring};
 
     let a = MaxPlus(5.0f32);
     assert_eq!(a.add(a).to_scalar(), a.to_scalar());

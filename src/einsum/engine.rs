@@ -560,8 +560,12 @@ impl Einsum<usize> {
                 let (a_data, a_shape) = self.execute_tree_generic::<S>(&args[0], tensors);
                 let (b_data, b_shape) = self.execute_tree_generic::<S>(&args[1], tensors);
                 contract_generic::<S>(
-                    &a_data, &a_shape, &eins.ixs[0],
-                    &b_data, &b_shape, &eins.ixs[1],
+                    &a_data,
+                    &a_shape,
+                    &eins.ixs[0],
+                    &b_data,
+                    &b_shape,
+                    &eins.ixs[1],
                     &eins.iy,
                 )
             }
@@ -574,9 +578,7 @@ impl Einsum<usize> {
     ) -> (Vec<S>, Vec<usize>) {
         assert!(!tensors.is_empty());
         if tensors.len() == 1 {
-            return reduce_generic::<S>(
-                &tensors[0].0, &tensors[0].1, &self.ixs[0], &self.iy,
-            );
+            return reduce_generic::<S>(&tensors[0].0, &tensors[0].1, &self.ixs[0], &self.iy);
         }
         let (mut data, mut shape) = tensors[0].clone();
         let mut current_ix = self.ixs[0].clone();
@@ -587,8 +589,12 @@ impl Einsum<usize> {
                 compute_intermediate_output(&current_ix, &self.ixs[i], &self.iy)
             };
             let result = contract_generic::<S>(
-                &data, &shape, &current_ix,
-                &tensors[i].0, &tensors[i].1, &self.ixs[i],
+                &data,
+                &shape,
+                &current_ix,
+                &tensors[i].0,
+                &tensors[i].1,
+                &self.ixs[i],
                 &iy,
             );
             data = result.0;
@@ -605,8 +611,12 @@ impl Einsum<usize> {
 /// performs only array indexing, coordinate increment, and semiring ops —
 /// zero heap allocations per iteration.
 fn contract_generic<S: crate::algebra::GenericSemiring>(
-    a_data: &[S], a_shape: &[usize], modes_a: &[usize],
-    b_data: &[S], b_shape: &[usize], modes_b: &[usize],
+    a_data: &[S],
+    a_shape: &[usize],
+    modes_a: &[usize],
+    b_data: &[S],
+    b_shape: &[usize],
+    modes_b: &[usize],
     modes_c: &[usize],
 ) -> (Vec<S>, Vec<usize>) {
     // Collect all distinct modes and their sizes (preserving order)
@@ -694,7 +704,10 @@ fn contract_generic<S: crate::algebra::GenericSemiring>(
 /// Precomputes output stride contributions per input dimension, then
 /// iterates with a coordinate counter — zero allocations in the hot loop.
 fn reduce_generic<S: crate::algebra::GenericSemiring>(
-    data: &[S], shape: &[usize], modes_in: &[usize], modes_out: &[usize],
+    data: &[S],
+    shape: &[usize],
+    modes_in: &[usize],
+    modes_out: &[usize],
 ) -> (Vec<S>, Vec<usize>) {
     if modes_in == modes_out {
         return (data.to_vec(), shape.to_vec());
@@ -707,7 +720,10 @@ fn reduce_generic<S: crate::algebra::GenericSemiring>(
         mode_to_in_pos[m] = pos;
     }
 
-    let out_shape: Vec<usize> = modes_out.iter().map(|&m| shape[mode_to_in_pos[m]]).collect();
+    let out_shape: Vec<usize> = modes_out
+        .iter()
+        .map(|&m| shape[mode_to_in_pos[m]])
+        .collect();
     let out_numel = out_shape.iter().product::<usize>().max(1);
     let mut result: Vec<S> = (0..out_numel).map(|_| S::zero()).collect();
 
@@ -725,8 +741,8 @@ fn reduce_generic<S: crate::algebra::GenericSemiring>(
     let mut coords = vec![0usize; ndim_in];
     let mut out_idx: usize = 0;
 
-    for in_idx in 0..in_numel {
-        result[out_idx] = result[out_idx].clone().add(data[in_idx].clone());
+    for in_val in data.iter().take(in_numel) {
+        result[out_idx] = result[out_idx].clone().add(in_val.clone());
 
         // Increment coordinates
         for d in 0..ndim_in {
@@ -955,10 +971,7 @@ mod cross_path_tests {
         // Generic (GenericSemiring) path
         let clone_a: Vec<Standard<f64>> = data_a.iter().map(|&x| Standard(x)).collect();
         let clone_b: Vec<Standard<f64>> = data_b.iter().map(|&x| Standard(x)).collect();
-        let tensors_clone = vec![
-            (clone_a, vec![2, 3]),
-            (clone_b, vec![3, 2]),
-        ];
+        let tensors_clone = vec![(clone_a, vec![2, 3]), (clone_b, vec![3, 2])];
         let sizes: HashMap<usize, usize> = [(0, 2), (1, 3), (2, 2)].into();
         let mut ein = Einsum::new(vec![vec![0, 1], vec![1, 2]], vec![0, 2], sizes.clone());
         ein.optimize_greedy();
@@ -973,13 +986,15 @@ mod cross_path_tests {
 
         // Compare
         assert_eq!(result_shape.as_slice(), result_backend.shape());
-        for i in 0..result_data.len() {
-            let generic_val = result_data[i].0;
+        for (i, generic_item) in result_data.iter().enumerate() {
+            let generic_val = generic_item.0;
             let backend_val = result_backend.get(i);
             assert!(
                 (generic_val - backend_val).abs() < 1e-10,
                 "Mismatch at index {}: generic={}, backend={}",
-                i, generic_val, backend_val,
+                i,
+                generic_val,
+                backend_val,
             );
         }
     }
@@ -1998,22 +2013,42 @@ mod execute_generic_tests {
     struct SumSemiring(f64);
 
     impl GenericSemiring for SumSemiring {
-        fn zero() -> Self { SumSemiring(0.0) }
-        fn one() -> Self { SumSemiring(1.0) }
-        fn add(self, rhs: Self) -> Self { SumSemiring(self.0 + rhs.0) }
-        fn mul(self, rhs: Self) -> Self { SumSemiring(self.0 * rhs.0) }
-        fn is_zero(&self) -> bool { self.0 == 0.0 }
+        fn zero() -> Self {
+            SumSemiring(0.0)
+        }
+        fn one() -> Self {
+            SumSemiring(1.0)
+        }
+        fn add(self, rhs: Self) -> Self {
+            SumSemiring(self.0 + rhs.0)
+        }
+        fn mul(self, rhs: Self) -> Self {
+            SumSemiring(self.0 * rhs.0)
+        }
+        fn is_zero(&self) -> bool {
+            self.0 == 0.0
+        }
     }
 
     #[test]
     fn test_execute_generic_matmul() {
         // A[i,j] * B[j,k] -> C[i,k], 2x2 matmul
         let a = (
-            vec![SumSemiring(1.0), SumSemiring(2.0), SumSemiring(3.0), SumSemiring(4.0)],
+            vec![
+                SumSemiring(1.0),
+                SumSemiring(2.0),
+                SumSemiring(3.0),
+                SumSemiring(4.0),
+            ],
             vec![2, 2], // column-major: [[1,3],[2,4]]
         );
         let b = (
-            vec![SumSemiring(5.0), SumSemiring(6.0), SumSemiring(7.0), SumSemiring(8.0)],
+            vec![
+                SumSemiring(5.0),
+                SumSemiring(6.0),
+                SumSemiring(7.0),
+                SumSemiring(8.0),
+            ],
             vec![2, 2], // column-major: [[5,7],[6,8]]
         );
 

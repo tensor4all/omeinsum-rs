@@ -4,7 +4,7 @@
 
 use omeinsum::backend::{Backend, Cpu};
 use omeinsum::tensor::TensorView;
-use omeinsum::{einsum, einsum_with_grad, GenericSemiring, Standard, Tensor};
+use omeinsum::{einsum, einsum_with_grad, Standard, Tensor};
 
 #[cfg(feature = "tropical")]
 use omeinsum::{MaxMul, MaxPlus, MinPlus};
@@ -280,7 +280,7 @@ fn test_einsum_batch_contraction() {
 #[cfg(feature = "tropical")]
 #[test]
 fn test_maxplus_is_zero() {
-    use omeinsum::algebra::Semiring;
+    use omeinsum::algebra::GenericSemiring;
 
     let zero = MaxPlus::<f32>::zero();
     let one = MaxPlus::<f32>::one();
@@ -294,7 +294,7 @@ fn test_maxplus_is_zero() {
 #[cfg(feature = "tropical")]
 #[test]
 fn test_minplus_is_zero() {
-    use omeinsum::algebra::Semiring;
+    use omeinsum::algebra::GenericSemiring;
 
     let zero = MinPlus::<f32>::zero();
     let one = MinPlus::<f32>::one();
@@ -308,7 +308,7 @@ fn test_minplus_is_zero() {
 #[cfg(feature = "tropical")]
 #[test]
 fn test_maxmul_is_zero() {
-    use omeinsum::algebra::Semiring;
+    use omeinsum::algebra::GenericSemiring;
 
     let zero = MaxMul::<f32>::zero();
     let one = MaxMul::<f32>::one();
@@ -391,7 +391,7 @@ fn test_tropical_needs_argmax() {
 #[cfg(feature = "tropical")]
 #[test]
 fn test_tropical_f64_operations() {
-    use omeinsum::algebra::Semiring;
+    use omeinsum::algebra::{GenericSemiring, Semiring};
 
     // MaxPlus f64
     let a = MaxPlus(2.0f64);
@@ -437,7 +437,7 @@ fn test_tropical_contract_binary_f64() {
 
 #[test]
 fn test_standard_is_zero() {
-    use omeinsum::algebra::Semiring;
+    use omeinsum::algebra::GenericSemiring;
 
     let zero = Standard::<f32>::zero();
     let one = Standard::<f32>::one();
@@ -450,7 +450,7 @@ fn test_standard_is_zero() {
 
 #[test]
 fn test_standard_f64() {
-    use omeinsum::algebra::Semiring;
+    use omeinsum::algebra::{GenericSemiring, Semiring};
 
     let a = Standard(2.0f64);
     let b = Standard(3.0f64);
@@ -1034,7 +1034,7 @@ fn test_einsum_builder_default() {
 #[cfg(feature = "tropical")]
 #[test]
 fn test_minplus_f32_operations() {
-    use omeinsum::algebra::Semiring;
+    use omeinsum::algebra::GenericSemiring;
     use omeinsum::MinPlus;
 
     let a = MinPlus(3.0_f32);
@@ -1056,7 +1056,7 @@ fn test_minplus_f32_operations() {
 #[cfg(feature = "tropical")]
 #[test]
 fn test_maxmul_f32_operations() {
-    use omeinsum::algebra::Semiring;
+    use omeinsum::algebra::GenericSemiring;
     use omeinsum::MaxMul;
 
     let a = MaxMul(3.0_f32);
