@@ -447,6 +447,18 @@ impl Cpu {
             let a_slice = &a[a_offset..a_offset + a_batch_stride];
             let b_slice = &b[b_offset..b_offset + b_batch_stride];
 
+            // Try the SIMD tropical path per batch; fall back to the generic
+            // semiring loop if the algebra isn't one tropical-gemm supports.
+            // `try_tropical_gemm` already takes care of the column-major /
+            // row-major swap (see the comment in its body).
+            #[cfg(feature = "tropical-kernels")]
+            {
+                if let Some(c_batch) = try_tropical_gemm::<A>(a_slice, m, k, b_slice, n) {
+                    c[c_offset..c_offset + c_batch_stride].copy_from_slice(&c_batch);
+                    continue;
+                }
+            }
+
             let c_batch = generic_gemm::<A>(a_slice, m, k, b_slice, n);
             c[c_offset..c_offset + c_batch_stride].copy_from_slice(&c_batch);
         }
@@ -1507,6 +1519,36 @@ mod tests {
             assert!(
                 (o - g).abs() < 1e-9,
                 "m={m} k={k} n={n}: mismatch at idx {i}: dispatch={o}, oracle={g}",
+            );
+        }
+    }
+
+    /// Regression test for the `gemm_batched_internal` dispatch gap: batched
+    /// MaxPlus GEMM must agree element-by-element with generic_gemm-per-batch,
+    /// across a non-square shape (which is where the layout bug hides).
+    #[cfg(feature = "tropical-kernels")]
+    #[test]
+    fn batched_dispatch_matches_generic_nonsquare() {
+        let cpu = Cpu;
+        let (batch_size, m, k, n) = (3usize, 3, 4, 5);
+        let a: Vec<f64> = (0..batch_size * m * k).map(|i| (i as f64) * 0.5).collect();
+        let b: Vec<f64> = (0..batch_size * k * n).map(|i| (i as f64) * 0.25 + 0.1).collect();
+
+        let c_batched =
+            cpu.gemm_batched_internal::<MaxPlus<f64>>(&a, batch_size, m, k, &b, n);
+
+        // Oracle: concatenated generic_gemm per batch.
+        let mut c_ref = Vec::with_capacity(batch_size * m * n);
+        for batch in 0..batch_size {
+            let a_slice = &a[batch * m * k..(batch + 1) * m * k];
+            let b_slice = &b[batch * k * n..(batch + 1) * k * n];
+            c_ref.extend(generic_gemm::<MaxPlus<f64>>(a_slice, m, k, b_slice, n));
+        }
+
+        for (i, (o, g)) in c_batched.iter().zip(c_ref.iter()).enumerate() {
+            assert!(
+                (o - g).abs() < 1e-9,
+                "batched dispatch diverges from generic at idx {i}: {o} vs {g}",
             );
         }
     }
