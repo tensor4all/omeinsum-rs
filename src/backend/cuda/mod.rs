@@ -990,6 +990,8 @@ mod tropical_guard_tests {
         );
         let sizes: HashMap<usize, usize> = [(0, 2), (1, 2), (2, 2)].into();
         let mut ein = Einsum::new(vec![vec![0, 1], vec![1, 2]], vec![0, 2], sizes);
+        // Optimize so this exercises execute_tree_with_argmax (the path that
+        // tropical gradient code actually uses), not the pairwise fallback.
         ein.optimize_greedy();
         let _ = ein.execute_with_argmax::<MaxPlus<f64>, f64, Cuda>(&[&a, &b]);
     }
