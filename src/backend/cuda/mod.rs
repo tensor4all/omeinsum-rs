@@ -46,6 +46,40 @@ use std::sync::{Arc, Mutex};
 use crate::algebra::{Algebra, Scalar};
 use crate::backend::traits::{Backend, BackendScalar, Storage};
 
+/// Phase 1 guard for issue #48: detect tropical algebras and panic with a
+/// clear message instead of silently dispatching to cuTENSOR's standard
+/// `(+, ×)` kernel. The actual tropical CUDA path (via `tropical-gemm-cuda`)
+/// is a follow-up.
+///
+/// This function is a no-op for algebras that are correctly supported on the
+/// `Cuda` backend (`Standard<f32>`, `Standard<f64>`, and the `Complex32` /
+/// `Complex64` aliases).
+#[inline]
+pub(crate) fn panic_if_unsupported_tropical<A: 'static>() {
+    #[cfg(feature = "tropical")]
+    {
+        use crate::algebra::{MaxMul, MaxPlus, MinPlus};
+        use std::any::{type_name, TypeId};
+
+        let tid = TypeId::of::<A>();
+        let tropical = tid == TypeId::of::<MaxPlus<f32>>()
+            || tid == TypeId::of::<MaxPlus<f64>>()
+            || tid == TypeId::of::<MinPlus<f32>>()
+            || tid == TypeId::of::<MinPlus<f64>>()
+            || tid == TypeId::of::<MaxMul<f32>>()
+            || tid == TypeId::of::<MaxMul<f64>>();
+        assert!(
+            !tropical,
+            "Cuda backend does not yet support tropical algebra `{}`. \
+             A call with this algebra would previously have silently returned \
+             a standard `(+, ×)` result. See \
+             https://github.com/tensor4all/omeinsum-rs/issues #48 for \
+             the design tracking actual tropical-gemm-cuda integration.",
+            type_name::<A>(),
+        );
+    }
+}
+
 // ============================================================================
 // CUDA-compatible complex number wrapper
 // ============================================================================
