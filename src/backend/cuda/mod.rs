@@ -939,6 +939,7 @@ mod tropical_guard_tests {
     }
 
     #[cfg(feature = "cuda")]
+    #[ignore = "requires CUDA GPU + cuTENSOR 2.x at runtime"]
     #[test]
     #[should_panic(expected = "issue #48")]
     fn cuda_contract_panics_on_tropical_maxplus_f64() {
