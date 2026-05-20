@@ -72,9 +72,9 @@ pub(crate) fn panic_if_unsupported_tropical<A: 'static>() {
             !tropical,
             "Cuda backend does not yet support tropical algebra `{}`. \
              A call with this algebra would previously have silently returned \
-             a standard `(+, ×)` result. See \
-             https://github.com/tensor4all/omeinsum-rs/issues #48 for \
-             the design tracking actual tropical-gemm-cuda integration.",
+             a standard `(+, ×)` result. See issue #48 \
+             (https://github.com/tensor4all/omeinsum-rs/issues/48) for the design \
+             tracking actual tropical-gemm-cuda integration.",
             type_name::<A>(),
         );
     }
