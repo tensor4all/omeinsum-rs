@@ -881,6 +881,9 @@ impl Backend for Cuda {
     where
         A::Scalar: BackendScalar<Self>,
     {
+        // Phase 1 (issue #48): for tropical algebras, point at the tracking
+        // issue rather than the generic cuTENSOR limitation message.
+        panic_if_unsupported_tropical::<A>();
         // cuTENSOR does not support argmax tracking.
         // This would require a custom CUDA kernel.
         panic!(
@@ -962,5 +965,32 @@ mod tropical_guard_tests {
         let sizes: HashMap<usize, usize> = [(0, 2), (1, 2), (2, 2)].into();
         let ein = Einsum::new(vec![vec![0, 1], vec![1, 2]], vec![0, 2], sizes);
         let _ = ein.execute::<MaxPlus<f64>, f64, Cuda>(&[&a, &b]);
+    }
+
+    #[cfg(feature = "cuda")]
+    #[ignore = "requires CUDA GPU + cuTENSOR 2.x at runtime"]
+    #[test]
+    #[should_panic(expected = "issue #48")]
+    fn cuda_contract_with_argmax_panics_on_tropical_maxplus_f64() {
+        use crate::einsum::Einsum;
+        use crate::tensor::Tensor;
+        use crate::{Cuda, MaxPlus};
+        use std::collections::HashMap;
+
+        let cuda = Cuda::new().expect("CUDA device required for this test");
+        let a = Tensor::<f64, Cuda>::from_data_with_backend(
+            &[1.0, 2.0, 3.0, 4.0],
+            &[2, 2],
+            cuda.clone(),
+        );
+        let b = Tensor::<f64, Cuda>::from_data_with_backend(
+            &[5.0, 6.0, 7.0, 8.0],
+            &[2, 2],
+            cuda.clone(),
+        );
+        let sizes: HashMap<usize, usize> = [(0, 2), (1, 2), (2, 2)].into();
+        let mut ein = Einsum::new(vec![vec![0, 1], vec![1, 2]], vec![0, 2], sizes);
+        ein.optimize_greedy();
+        let _ = ein.execute_with_argmax::<MaxPlus<f64>, f64, Cuda>(&[&a, &b]);
     }
 }
