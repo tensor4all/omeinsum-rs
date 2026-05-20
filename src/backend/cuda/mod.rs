@@ -46,16 +46,14 @@ use std::sync::{Arc, Mutex};
 use crate::algebra::{Algebra, Scalar};
 use crate::backend::traits::{Backend, BackendScalar, Storage};
 
-/// Phase 1 guard for issue #48: detect tropical algebras and panic with a
-/// clear message instead of silently dispatching to cuTENSOR's standard
-/// `(+, ×)` kernel. The actual tropical CUDA path (via `tropical-gemm-cuda`)
-/// is a follow-up.
+/// Issue #48 guard: panic on tropical algebras instead of silently
+/// dispatching them through cuTENSOR's standard `(+, ×)` kernel.
 ///
-/// This function is a no-op for algebras that are correctly supported on the
-/// `Cuda` backend (`Standard<f32>`, `Standard<f64>`, and the `Complex32` /
-/// `Complex64` aliases).
+/// Only tropical algebras are checked here. Whether other algebras are
+/// valid on the `Cuda` backend is enforced by `BackendScalar<Cuda>` on
+/// `Backend::contract`.
 #[inline]
-pub(crate) fn panic_if_unsupported_tropical<A: 'static>() {
+fn panic_if_unsupported_tropical<A: 'static>() {
     #[cfg(feature = "tropical")]
     {
         use crate::algebra::{MaxMul, MaxPlus, MinPlus};
@@ -71,8 +69,8 @@ pub(crate) fn panic_if_unsupported_tropical<A: 'static>() {
         assert!(
             !tropical,
             "Cuda backend does not yet support tropical algebra `{}`. \
-             A call with this algebra would previously have silently returned \
-             a standard `(+, ×)` result. See issue #48 \
+             Without this guard, the call would silently dispatch to the \
+             standard `(+, ×)` cuTENSOR kernel. See issue #48 \
              (https://github.com/tensor4all/omeinsum-rs/issues/48) for the design \
              tracking actual tropical-gemm-cuda integration.",
             type_name::<A>(),
@@ -794,8 +792,6 @@ impl Backend for Cuda {
     where
         A::Scalar: BackendScalar<Self>,
     {
-        // Phase 1 (issue #48): refuse tropical algebras loudly instead of
-        // silently dispatching the f32/f64 cuTENSOR standard path.
         panic_if_unsupported_tropical::<A>();
 
         // Compute output strides (column-major)
@@ -881,8 +877,6 @@ impl Backend for Cuda {
     where
         A::Scalar: BackendScalar<Self>,
     {
-        // Phase 1 (issue #48): for tropical algebras, point at the tracking
-        // issue rather than the generic cuTENSOR limitation message.
         panic_if_unsupported_tropical::<A>();
         // cuTENSOR does not support argmax tracking.
         // This would require a custom CUDA kernel.
