@@ -852,3 +852,51 @@ impl Backend for Cuda {
         );
     }
 }
+
+#[cfg(all(test, feature = "tropical"))]
+mod tropical_guard_tests {
+    use super::*;
+    use crate::algebra::{MaxMul, MaxPlus, MinPlus, Standard};
+
+    #[test]
+    fn standard_f64_passes_guard() {
+        // Standard<f64> must NOT panic — it is the supported, correct path.
+        panic_if_unsupported_tropical::<Standard<f64>>();
+    }
+
+    #[test]
+    #[should_panic(expected = "issue #48")]
+    fn max_plus_f64_panics() {
+        panic_if_unsupported_tropical::<MaxPlus<f64>>();
+    }
+
+    #[test]
+    #[should_panic(expected = "issue #48")]
+    fn max_plus_f32_panics() {
+        panic_if_unsupported_tropical::<MaxPlus<f32>>();
+    }
+
+    #[test]
+    #[should_panic(expected = "issue #48")]
+    fn min_plus_f64_panics() {
+        panic_if_unsupported_tropical::<MinPlus<f64>>();
+    }
+
+    #[test]
+    #[should_panic(expected = "issue #48")]
+    fn min_plus_f32_panics() {
+        panic_if_unsupported_tropical::<MinPlus<f32>>();
+    }
+
+    #[test]
+    #[should_panic(expected = "issue #48")]
+    fn max_mul_f64_panics() {
+        panic_if_unsupported_tropical::<MaxMul<f64>>();
+    }
+
+    #[test]
+    #[should_panic(expected = "issue #48")]
+    fn max_mul_f32_panics() {
+        panic_if_unsupported_tropical::<MaxMul<f32>>();
+    }
+}
