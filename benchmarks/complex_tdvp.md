@@ -5,6 +5,7 @@
 - Branch: `perf/complex-gemm`
 - Owner workload: `rydbergsim-rs` issue #272 (Keesling 2019 TDVP reproduction)
 - Target repository: `tensor4all/omeinsum-rs`
+- Tracking issue: [`tensor4all/omeinsum-rs#53`](https://github.com/tensor4all/omeinsum-rs/issues/53)
 - Current state: benchmark workload added; baseline measurement and implementation pending
 
 ## Problem
