@@ -6,7 +6,7 @@
 - Owner workload: `rydbergsim-rs` issue #272 (Keesling 2019 TDVP reproduction)
 - Target repository: `tensor4all/omeinsum-rs`
 - Tracking issue: [`tensor4all/omeinsum-rs#53`](https://github.com/tensor4all/omeinsum-rs/issues/53)
-- Current state: benchmark workload added; baseline measurement and implementation pending
+- Current state: CPU implementation and upstream validation complete; downstream validation pending
 
 ## Problem
 
@@ -165,6 +165,49 @@ For every case and `chi`:
 - Candidate/baseline speedup.
 - Peak resident memory for the complete benchmark process when practical.
 - Allocation count in focused unit tests for direct-layout helpers.
+
+## Validation record (2026-07-15)
+
+Measurements ran on remote host `6xa800` (2-socket Intel Xeon Platinum 8378A,
+128 logical CPUs) with Rust 1.88.0. Baseline and candidate used the same release
+profile, benchmark inputs, and Criterion settings. Criterion artifacts are under
+`~/projects/omeinsum-rs/target/criterion/tdvp-complex-binary` on that host.
+
+The repository-mandated `runscribe` executable was unavailable locally and on
+the remote host; the similarly named PyPI package is an unrelated terminal
+recorder. With the owner-requested remote workflow, runs were submitted through
+`easy-ssh submit` and their full job output was captured instead. There is
+therefore no runscribe run directory for these measurements.
+
+Times below are Criterion point estimates in milliseconds; parenthesized ranges
+are the default 95% confidence intervals. Speedup is baseline divided by
+candidate.
+
+| Case | chi | Scalar baseline | faer candidate | Speedup | Candidate throughput |
+|---|---:|---:|---:|---:|---:|
+| `h1-left-environment` | 32 | 1.0503 (1.0419-1.0651) | 0.084151 (0.084054-0.084254) | 12.48x | 7.0091 Gelem/s |
+| `h1-right-environment` | 32 | 1.1197 (1.1158-1.1286) | 0.13741 (0.13709-0.13759) | 8.15x | 4.2924 Gelem/s |
+| `h2-left-environment` | 32 | 1.8304 (1.8032-1.9023) | 0.15972 (0.15964-0.15988) | 11.46x | 7.3856 Gelem/s |
+| `h2-right-environment` | 32 | 2.4375 (2.3791-2.5324) | 0.30246 (0.30238-0.30255) | 8.06x | 3.9001 Gelem/s |
+| `h1-left-environment` | 64 | 8.0044 (7.9638-8.1163) | 0.61142 (0.61091-0.61199) | 13.09x | 7.7175 Gelem/s |
+| `h1-right-environment` | 64 | 12.281 (11.996-12.757) | 0.96001 (0.95767-0.96541) | 12.79x | 4.9151 Gelem/s |
+| `h2-left-environment` | 64 | 16.475 (15.980-17.505) | 1.1750 (1.1745-1.1756) | 14.02x | 8.0319 Gelem/s |
+| `h2-right-environment` | 64 | 33.899 (32.550-35.217) | 1.9024 (1.8967-1.9183) | 17.82x | 4.9606 Gelem/s |
+| `h1-left-environment` | 128 | 92.408 (88.993-95.673) | 4.5194 (4.4687-4.6194) | 20.45x | 8.3525 Gelem/s |
+| `h1-right-environment` | 128 | 130.87 (129.61-132.46) | 5.9194 (5.9064-5.9326) | 22.11x | 6.3772 Gelem/s |
+| `h2-left-environment` | 128 | 164.62 (163.87-166.52) | 8.6727 (8.6685-8.6766) | 18.98x | 8.7051 Gelem/s |
+| `h2-right-environment` | 128 | 248.54 (247.66-249.35) | 11.647 (11.623-11.670) | 21.34x | 6.4822 Gelem/s |
+
+All four chi=64 cases exceed the required 5x threshold. The existing real f32
+`binary` benchmark suite was also compared against a clean `eaf29fe` worktree.
+Two noisy initial outliers were rerun: `high_d_12x12_contract_6` measured 40.35
+microseconds versus 40.21 microseconds (+0.34%), and
+`high_d_20x20_contract_9` measured 28.51 milliseconds versus 28.83 milliseconds
+(-1.1%). No repeatable real-valued regression exceeded 5%.
+
+`make check` passed after the final change: clippy with `tropical parallel`, 158
+library tests passed (11 ignored), 333 integration tests passed, and 16 doctests
+passed (4 ignored).
 
 ### Acceptance criteria
 

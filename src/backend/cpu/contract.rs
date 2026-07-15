@@ -3,8 +3,21 @@
 use std::collections::HashSet;
 
 use crate::backend::contract_plan::{
-    classify_modes, compute_permutation, mode_position, product_of_dims, reduce_trace,
+    classify_modes, compute_permutation, mode_position, product_of_dims as nonzero_product_of_dims,
+    reduce_trace,
 };
+
+// Empty mode groups are scalar dimensions; actual zero-sized modes stay zero.
+fn product_of_dims(modes: &[i32], all_modes: &[i32], shape: &[usize]) -> usize {
+    if modes
+        .iter()
+        .any(|&mode| shape[mode_position(all_modes, mode)] == 0)
+    {
+        0
+    } else {
+        nonzero_product_of_dims(modes, all_modes, shape)
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum MaterializationPlan {
@@ -764,6 +777,7 @@ mod tests {
         assert_eq!(product_of_dims(&[0], modes, shape), 2);
         assert_eq!(product_of_dims(&[1, 2], modes, shape), 12);
         assert_eq!(product_of_dims(&[], modes, shape), 1);
+        assert_eq!(product_of_dims(&[1], modes, &[2, 0, 4]), 0);
     }
 
     #[test]

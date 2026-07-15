@@ -6,11 +6,28 @@ use std::collections::HashMap;
 
 use omeinsum::backend::Cpu;
 use omeinsum::einsum::Einsum;
-use omeinsum::{einsum, Standard, Tensor};
+use omeinsum::{einsum, Complex32, Standard, Tensor};
 
 // ============================================================================
 // Basic Binary Contractions
 // ============================================================================
+
+#[test]
+fn test_binary_batched_complex_zero_dimensions() {
+    let a = Tensor::<Complex32, Cpu>::from_data(&[], &[2, 0, 3]);
+    let b = Tensor::<Complex32, Cpu>::from_data(&[Complex32::new(1.0, -0.5); 24], &[2, 3, 4]);
+    let zero_free =
+        einsum::<Standard<Complex32>, _, _>(&[&a, &b], &[&[0, 1, 2], &[0, 2, 3]], &[0, 1, 3]);
+    assert_eq!(zero_free.shape(), &[2, 0, 4]);
+    assert!(zero_free.to_vec().is_empty());
+
+    let a = Tensor::<Complex32, Cpu>::from_data(&[], &[2, 3, 0]);
+    let b = Tensor::<Complex32, Cpu>::from_data(&[], &[2, 0, 4]);
+    let zero_contract =
+        einsum::<Standard<Complex32>, _, _>(&[&a, &b], &[&[0, 1, 2], &[0, 2, 3]], &[0, 1, 3]);
+    assert_eq!(zero_contract.shape(), &[2, 3, 4]);
+    assert_eq!(zero_contract.to_vec(), vec![Complex32::new(0.0, 0.0); 24]);
+}
 
 #[test]
 fn test_binary_matmul_ij_jk_ik() {
