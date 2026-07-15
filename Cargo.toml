@@ -100,5 +100,9 @@ name = "binary"
 harness = false
 
 [[bench]]
+name = "complex_tdvp"
+harness = false
+
+[[bench]]
 name = "network"
 harness = false

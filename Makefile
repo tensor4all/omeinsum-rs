@@ -8,7 +8,7 @@ BENCH_WARMUP ?= 5
 BENCH_DIM ?= 128
 BENCH_BATCH ?= 24
 
-.PHONY: all build build-debug cargo-check check test test-gpu test-gpu-tropical test-release bench bench-binary bench-network bench-cpu-contract bench-julia bench-compare docs clean help
+.PHONY: all build build-debug cargo-check check test test-gpu test-gpu-tropical test-release bench bench-binary bench-complex-tdvp bench-network bench-cpu-contract bench-julia bench-compare docs clean help
 .PHONY: setup setup-rust
 .PHONY: docs-build docs-serve docs-book docs-book-serve
 .PHONY: fmt fmt-check clippy lint coverage
@@ -48,6 +48,7 @@ help:
 	@echo "Benchmark targets:"
 	@echo "  bench          - Run all Rust benchmarks"
 	@echo "  bench-binary   - Run binary contraction benchmarks"
+	@echo "  bench-complex-tdvp - Run Complex64 TDVP-shaped binary contractions"
 	@echo "  bench-network  - Run tensor-network benchmarks"
 	@echo "  bench-cpu-contract - Run the CPU contraction benchmark example"
 	@echo "                   Override BENCH_SCENARIO, BENCH_ITERATIONS, BENCH_WARMUP,"
@@ -153,6 +154,9 @@ bench:
 
 bench-binary:
 	cargo bench --bench binary
+
+bench-complex-tdvp:
+	cargo bench --bench complex_tdvp
 
 bench-network:
 	cargo bench --bench network
