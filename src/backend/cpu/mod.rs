@@ -1652,40 +1652,52 @@ mod tests {
     }
 
     #[test]
-    fn test_complex_batched_layout_gemm_allocates_only_output() {
+    fn test_complex_batched_layout_gemm_does_not_allocate_temporary_outputs() {
         let cpu = Cpu;
-        let batch_size = 3usize;
-        let a = vec![Complex32::new(1.0, 0.5); batch_size * 4];
-        let b = vec![Complex32::new(0.5, -1.0); batch_size * 4];
+        let (batch_size, dim) = (3usize, 64usize);
+        let matrix_len = dim * dim;
+        let a = vec![Complex32::new(1.0, 0.5); batch_size * matrix_len];
+        let b = vec![Complex32::new(0.5, -1.0); batch_size * matrix_len];
         let a_layout = MatrixLayout {
             data: &a,
-            rows: 2,
-            cols: 2,
+            rows: dim,
+            cols: dim,
             row_stride: batch_size as isize,
-            col_stride: (batch_size * 2) as isize,
+            col_stride: (batch_size * dim) as isize,
         };
         let b_layout = MatrixLayout {
             data: &b,
-            rows: 2,
-            cols: 2,
+            rows: dim,
+            cols: dim,
             row_stride: batch_size as isize,
-            col_stride: (batch_size * 2) as isize,
+            col_stride: (batch_size * dim) as isize,
         };
+        let mut one_output = vec![Complex32::new(0.0, 0.0); matrix_len];
 
+        // Warm faer's dispatch before measuring its per-call workspace behavior.
+        faer_gemm_layout_into(a_layout, b_layout, &mut one_output);
         drop(
             cpu.gemm_batched_standard_layout_internal::<Standard<Complex32>>(
                 batch_size, a_layout, b_layout,
             ),
         );
-        let (result, allocations) = allocation_counting::with_allocation_counting(|| {
+
+        let ((), workspace_allocations) = allocation_counting::with_allocation_counting(|| {
+            faer_gemm_layout_into(a_layout, b_layout, &mut one_output);
+        });
+        let (result, batched_allocations) = allocation_counting::with_allocation_counting(|| {
             cpu.gemm_batched_standard_layout_internal::<Standard<Complex32>>(
                 batch_size, a_layout, b_layout,
             )
             .expect("Complex32 batches should use faer")
         });
 
-        assert_eq!(result.len(), batch_size * 4);
-        assert_eq!(allocations, 1, "batched GEMM should allocate only output");
+        assert_eq!(result.len(), batch_size * matrix_len);
+        assert_eq!(
+            batched_allocations,
+            1 + batch_size * workspace_allocations,
+            "batched GEMM should allocate one result plus only faer's per-batch workspace"
+        );
     }
 
     #[test]

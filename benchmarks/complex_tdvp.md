@@ -169,9 +169,11 @@ For every case and `chi`:
 ## Validation record (2026-07-15)
 
 Measurements ran on remote host `6xa800` (2-socket Intel Xeon Platinum 8378A,
-128 logical CPUs) with Rust 1.88.0. Baseline and candidate used the same release
-profile, benchmark inputs, and Criterion settings. Criterion artifacts are under
-`~/projects/omeinsum-rs/target/criterion/tdvp-complex-binary` on that host.
+128 logical CPUs) with Rust 1.88.0. The scalar baseline was commit `eaf29fe`; the
+faer implementation was commit `6c273ae`. Both used the same release profile,
+benchmark inputs, and Criterion settings. Criterion artifacts are under
+`~/projects/omeinsum-rs-complex-median/target/criterion/tdvp-complex-binary` on
+that host.
 
 The repository-mandated `runscribe` executable was unavailable locally and on
 the remote host; the similarly named PyPI package is an unrelated terminal
@@ -179,24 +181,24 @@ recorder. With the owner-requested remote workflow, runs were submitted through
 `easy-ssh submit` and their full job output was captured instead. There is
 therefore no runscribe run directory for these measurements.
 
-Times below are Criterion point estimates in milliseconds; parenthesized ranges
-are the default 95% confidence intervals. Speedup is baseline divided by
-candidate.
+Times below are Criterion median estimates in milliseconds; parenthesized ranges
+are the median's bootstrap 95% confidence intervals from `estimates.json`.
+Speedup is baseline median divided by candidate median.
 
 | Case | chi | Scalar baseline | faer candidate | Speedup | Candidate throughput |
 |---|---:|---:|---:|---:|---:|
-| `h1-left-environment` | 32 | 1.0503 (1.0419-1.0651) | 0.084151 (0.084054-0.084254) | 12.48x | 7.0091 Gelem/s |
-| `h1-right-environment` | 32 | 1.1197 (1.1158-1.1286) | 0.13741 (0.13709-0.13759) | 8.15x | 4.2924 Gelem/s |
-| `h2-left-environment` | 32 | 1.8304 (1.8032-1.9023) | 0.15972 (0.15964-0.15988) | 11.46x | 7.3856 Gelem/s |
-| `h2-right-environment` | 32 | 2.4375 (2.3791-2.5324) | 0.30246 (0.30238-0.30255) | 8.06x | 3.9001 Gelem/s |
-| `h1-left-environment` | 64 | 8.0044 (7.9638-8.1163) | 0.61142 (0.61091-0.61199) | 13.09x | 7.7175 Gelem/s |
-| `h1-right-environment` | 64 | 12.281 (11.996-12.757) | 0.96001 (0.95767-0.96541) | 12.79x | 4.9151 Gelem/s |
-| `h2-left-environment` | 64 | 16.475 (15.980-17.505) | 1.1750 (1.1745-1.1756) | 14.02x | 8.0319 Gelem/s |
-| `h2-right-environment` | 64 | 33.899 (32.550-35.217) | 1.9024 (1.8967-1.9183) | 17.82x | 4.9606 Gelem/s |
-| `h1-left-environment` | 128 | 92.408 (88.993-95.673) | 4.5194 (4.4687-4.6194) | 20.45x | 8.3525 Gelem/s |
-| `h1-right-environment` | 128 | 130.87 (129.61-132.46) | 5.9194 (5.9064-5.9326) | 22.11x | 6.3772 Gelem/s |
-| `h2-left-environment` | 128 | 164.62 (163.87-166.52) | 8.6727 (8.6685-8.6766) | 18.98x | 8.7051 Gelem/s |
-| `h2-right-environment` | 128 | 248.54 (247.66-249.35) | 11.647 (11.623-11.670) | 21.34x | 6.4822 Gelem/s |
+| `h1-left-environment` | 32 | 1.02905 (1.02593-1.10051) | 0.0850231 (0.0846379-0.0851403) | 12.10x | 6.9372 Gelem/s |
+| `h1-right-environment` | 32 | 1.11454 (1.10367-1.19000) | 0.137350 (0.137313-0.137598) | 8.11x | 4.2943 Gelem/s |
+| `h2-left-environment` | 32 | 1.92220 (1.82214-2.11122) | 0.166644 (0.162343-0.178066) | 11.53x | 7.0788 Gelem/s |
+| `h2-right-environment` | 32 | 2.40304 (2.37614-2.73987) | 0.309394 (0.308372-0.309727) | 7.77x | 3.8128 Gelem/s |
+| `h1-left-environment` | 64 | 7.94239 (7.88650-9.13513) | 0.613996 (0.613023-0.615307) | 12.94x | 7.6851 Gelem/s |
+| `h1-right-environment` | 64 | 12.0928 (11.9707-12.9674) | 0.944706 (0.944430-0.945360) | 12.80x | 4.9948 Gelem/s |
+| `h2-left-environment` | 64 | 17.5628 (15.8957-18.3190) | 1.18860 (1.18437-1.19116) | 14.78x | 7.9397 Gelem/s |
+| `h2-right-environment` | 64 | 31.9260 (29.1754-32.3224) | 1.88922 (1.88402-1.90069) | 16.90x | 4.9953 Gelem/s |
+| `h1-left-environment` | 128 | 81.5555 (81.3140-92.3979) | 4.47290 (4.46816-4.48079) | 18.23x | 8.4394 Gelem/s |
+| `h1-right-environment` | 128 | 134.061 (128.173-137.447) | 5.78016 (5.77582-5.78916) | 23.19x | 6.5307 Gelem/s |
+| `h2-left-environment` | 128 | 164.353 (163.578-182.110) | 8.77822 (8.75957-8.87026) | 18.72x | 8.6005 Gelem/s |
+| `h2-right-environment` | 128 | 252.952 (250.701-257.196) | 11.7994 (11.7127-11.8462) | 21.44x | 6.3984 Gelem/s |
 
 All four chi=64 cases exceed the required 5x threshold. The existing real f32
 `binary` benchmark suite was also compared against a clean `eaf29fe` worktree.
