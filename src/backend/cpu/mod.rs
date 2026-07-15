@@ -116,31 +116,30 @@ fn should_use_standard_batched_gemm(batch_size: usize, m: usize, k: usize, n: us
 mod allocation_counting {
     use std::alloc::{GlobalAlloc, Layout, System};
     use std::cell::Cell;
-    use std::sync::atomic::{AtomicUsize, Ordering};
 
     pub(crate) struct CountingAllocator;
 
-    static ALLOCATION_COUNT: AtomicUsize = AtomicUsize::new(0);
     thread_local! {
+        static ALLOCATION_COUNT: Cell<usize> = const { Cell::new(0) };
         static COUNT_ALLOCATIONS: Cell<bool> = const { Cell::new(false) };
+    }
+
+    fn record_allocation() {
+        COUNT_ALLOCATIONS.with(|active| {
+            if active.get() {
+                ALLOCATION_COUNT.with(|count| count.set(count.get() + 1));
+            }
+        });
     }
 
     unsafe impl GlobalAlloc for CountingAllocator {
         unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-            COUNT_ALLOCATIONS.with(|active| {
-                if active.get() {
-                    ALLOCATION_COUNT.fetch_add(1, Ordering::Relaxed);
-                }
-            });
+            record_allocation();
             unsafe { System.alloc(layout) }
         }
 
         unsafe fn alloc_zeroed(&self, layout: Layout) -> *mut u8 {
-            COUNT_ALLOCATIONS.with(|active| {
-                if active.get() {
-                    ALLOCATION_COUNT.fetch_add(1, Ordering::Relaxed);
-                }
-            });
+            record_allocation();
             unsafe { System.alloc_zeroed(layout) }
         }
 
@@ -149,21 +148,55 @@ mod allocation_counting {
         }
 
         unsafe fn realloc(&self, ptr: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
-            COUNT_ALLOCATIONS.with(|active| {
-                if active.get() {
-                    ALLOCATION_COUNT.fetch_add(1, Ordering::Relaxed);
-                }
-            });
+            record_allocation();
             unsafe { System.realloc(ptr, layout, new_size) }
         }
     }
 
     pub(crate) fn with_allocation_counting<T>(f: impl FnOnce() -> T) -> (T, usize) {
-        ALLOCATION_COUNT.store(0, Ordering::Relaxed);
+        ALLOCATION_COUNT.with(|count| count.set(0));
         COUNT_ALLOCATIONS.with(|active| active.set(true));
         let result = f();
         COUNT_ALLOCATIONS.with(|active| active.set(false));
-        (result, ALLOCATION_COUNT.load(Ordering::Relaxed))
+        let allocations = ALLOCATION_COUNT.with(Cell::get);
+        (result, allocations)
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::with_allocation_counting;
+        use std::hint::spin_loop;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::Arc;
+        use std::thread;
+
+        #[test]
+        fn allocation_counts_are_isolated_between_threads() {
+            let phase = Arc::new(AtomicUsize::new(0));
+            let worker_phase = Arc::clone(&phase);
+            let worker = thread::spawn(move || {
+                let (buffer, allocations) = with_allocation_counting(|| {
+                    let buffer = Vec::<u8>::with_capacity(64);
+                    worker_phase.store(1, Ordering::Release);
+                    while worker_phase.load(Ordering::Acquire) != 2 {
+                        spin_loop();
+                    }
+                    buffer
+                });
+                drop(buffer);
+                allocations
+            });
+
+            while phase.load(Ordering::Acquire) != 1 {
+                spin_loop();
+            }
+            let ((), allocations) = with_allocation_counting(|| {
+                phase.store(2, Ordering::Release);
+            });
+
+            assert_eq!(allocations, 0);
+            assert_eq!(worker.join().unwrap(), 1);
+        }
     }
 }
 
