@@ -2,6 +2,9 @@
 
 use std::collections::HashSet;
 
+use strided_perm::copy_into_col_major;
+use strided_view::{StridedView, StridedViewMut};
+
 use crate::backend::contract_plan::{
     classify_modes, compute_permutation, mode_position, product_of_dims as nonzero_product_of_dims,
     reduce_trace,
@@ -237,7 +240,7 @@ fn analyze_contraction_layout(
     }
 }
 
-use super::buffer_pool::ScratchPool;
+use super::buffer_pool::{PackingBuffer, ScratchPool};
 use super::MatrixLayout;
 use crate::algebra::Algebra;
 use crate::backend::Cpu;
@@ -270,8 +273,8 @@ fn matrix_layout_from_operand<'a, T>(
     }
 }
 
-struct MaterializedMatrixOperand<T> {
-    data: Vec<T>,
+struct MaterializedMatrixOperand<T: Copy + 'static> {
+    data: PackingBuffer<T>,
     shape: Vec<usize>,
     strides: Vec<usize>,
     modes: Vec<i32>,
@@ -297,12 +300,17 @@ fn materialize_matrix_operand<T: Copy + Default>(
         .iter()
         .map(|&mode| shape[mode_position(modes, mode)])
         .collect();
-    let mut scratch = Vec::new();
+    let numel = shape.iter().product();
+    let mut packed = PackingBuffer::acquire(numel);
+    let borrowed =
+        materialize_with_permutation_into(data, shape, strides, &perm, packed.as_mut_vec())
+            .is_borrowed();
+    if borrowed {
+        packed.as_mut_vec().copy_from_slice(&data[..numel]);
+    }
 
     MaterializedMatrixOperand {
-        data: materialize_with_permutation_into(data, shape, strides, &perm, &mut scratch)
-            .as_slice()
-            .to_vec(),
+        data: packed,
         strides: compute_contiguous_strides(&target_shape),
         shape: target_shape,
         modes: target_modes,
@@ -342,6 +350,13 @@ impl<'a, T> MaterializedSlice<'a, T> {
     fn as_slice(&self) -> &'a [T] {
         match self {
             Self::Borrowed(data) | Self::Scratch(data) => data,
+        }
+    }
+
+    fn is_borrowed(&self) -> bool {
+        match self {
+            Self::Borrowed(_) => true,
+            Self::Scratch(_) => false,
         }
     }
 }
@@ -410,7 +425,7 @@ where
                     &plan.contracted_modes,
                 );
                 matrix_layout_from_operand(
-                    &left_materialized.data,
+                    left_materialized.data.as_slice(),
                     &left_materialized.shape,
                     &left_materialized.strides,
                     &left_materialized.modes,
@@ -440,7 +455,7 @@ where
                     &plan.right_modes,
                 );
                 matrix_layout_from_operand(
-                    &right_materialized.data,
+                    right_materialized.data.as_slice(),
                     &right_materialized.shape,
                     &right_materialized.strides,
                     &right_materialized.modes,
@@ -557,9 +572,12 @@ where
 /// Ensure data is contiguous (copy if strided).
 fn ensure_contiguous<T: Copy + Default>(data: &[T], shape: &[usize], strides: &[usize]) -> Vec<T> {
     let mut scratch = Vec::new();
-    ensure_contiguous_into(data, shape, strides, &mut scratch)
-        .as_slice()
-        .to_vec()
+    let borrowed = ensure_contiguous_into(data, shape, strides, &mut scratch).is_borrowed();
+    if borrowed {
+        data.to_vec()
+    } else {
+        scratch
+    }
 }
 
 fn ensure_contiguous_into<'a, T: Copy + Default>(
@@ -575,9 +593,12 @@ fn ensure_contiguous_into<'a, T: Copy + Default>(
 /// Permute data according to axis permutation.
 fn permute_data<T: Copy + Default>(data: &[T], shape: &[usize], perm: &[usize]) -> Vec<T> {
     let mut scratch = Vec::new();
-    permute_data_into(data, shape, perm, &mut scratch)
-        .as_slice()
-        .to_vec()
+    let borrowed = permute_data_into(data, shape, perm, &mut scratch).is_borrowed();
+    if borrowed {
+        data.to_vec()
+    } else {
+        scratch
+    }
 }
 
 fn permute_data_into<'a, T: Copy + Default>(
@@ -602,31 +623,28 @@ fn materialize_with_permutation_into<'a, T: Copy + Default>(
         return MaterializedSlice::Borrowed(data);
     }
 
-    scratch.clear();
     let numel: usize = shape.iter().product();
+    scratch.truncate(numel);
     scratch.resize(numel, T::default());
-    let new_shape: Vec<usize> = perm.iter().map(|&p| shape[p]).collect();
-    let mut coords = vec![0usize; new_shape.len()];
-    let last_axis = new_shape.len().saturating_sub(1);
-    let mut old_idx = 0usize;
-
-    for result_elem in scratch.iter_mut().take(numel) {
-        *result_elem = data[old_idx];
-
-        for axis in 0..new_shape.len() {
-            coords[axis] += 1;
-            old_idx += strides[perm[axis]];
-            if coords[axis] < new_shape[axis] {
-                break;
-            }
-
-            coords[axis] = 0;
-            old_idx -= strides[perm[axis]] * new_shape[axis];
-            if axis == last_axis {
-                break;
-            }
-        }
+    if numel == 0 {
+        return MaterializedSlice::Scratch(scratch.as_slice());
     }
+
+    let target_shape: Vec<usize> = perm.iter().map(|&axis| shape[axis]).collect();
+    let source_strides: Vec<isize> = perm
+        .iter()
+        .map(|&axis| isize::try_from(strides[axis]).expect("source stride exceeds isize"))
+        .collect();
+    let target_strides: Vec<isize> = compute_contiguous_strides(&target_shape)
+        .into_iter()
+        .map(|stride| isize::try_from(stride).expect("target stride exceeds isize"))
+        .collect();
+    let source = StridedView::new(data, &target_shape, &source_strides, 0)
+        .expect("validated tensor layout must fit the source storage");
+    let mut target = StridedViewMut::new(scratch, &target_shape, &target_strides, 0)
+        .expect("contiguous target layout must fit the materialization buffer");
+    copy_into_col_major(&mut target, &source)
+        .expect("source and target materialization shapes must match");
 
     MaterializedSlice::Scratch(scratch.as_slice())
 }
@@ -860,10 +878,99 @@ mod tests {
     }
 
     #[test]
+    fn test_owning_materializers_copy_identity_inputs() {
+        #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+        struct Marker(u32);
+
+        let mut data: Vec<_> = (1..=6).map(Marker).collect();
+        let expected = data.clone();
+        let shape = [2, 3];
+        let strides = [1, 2];
+        let modes = [0, 1];
+
+        let matrix = materialize_matrix_operand(&data, &shape, &strides, &modes, &[], &[0], &[1]);
+        let contiguous = ensure_contiguous(&data, &shape, &strides);
+        let permuted = permute_data(&data, &shape, &[0, 1]);
+
+        data.fill(Marker(0));
+
+        assert_eq!(matrix.data.as_slice(), expected);
+        assert_eq!(matrix.shape, shape);
+        assert_eq!(matrix.strides, strides);
+        assert_eq!(matrix.modes, modes);
+        assert_eq!(contiguous, expected);
+        assert_eq!(permuted, expected);
+    }
+
+    #[test]
+    fn test_materialize_with_permutation_matches_scalar_reference() {
+        fn next_permutation(values: &mut [usize]) -> bool {
+            let Some(pivot) = (0..values.len().saturating_sub(1))
+                .rev()
+                .find(|&index| values[index] < values[index + 1])
+            else {
+                return false;
+            };
+            let successor = (pivot + 1..values.len())
+                .rev()
+                .find(|&index| values[pivot] < values[index])
+                .unwrap();
+            values.swap(pivot, successor);
+            values[pivot + 1..].reverse();
+            true
+        }
+
+        fn scalar_reference(
+            data: &[u32],
+            shape: &[usize],
+            strides: &[usize],
+            perm: &[usize],
+        ) -> Vec<u32> {
+            let target_shape: Vec<usize> = perm.iter().map(|&axis| shape[axis]).collect();
+            (0..shape.iter().product())
+                .map(|linear| {
+                    let mut remaining = linear;
+                    let mut source_index = 0;
+                    for (target_axis, &dimension) in target_shape.iter().enumerate() {
+                        let coordinate = remaining % dimension;
+                        remaining /= dimension;
+                        source_index += coordinate * strides[perm[target_axis]];
+                    }
+                    data[source_index]
+                })
+                .collect()
+        }
+
+        let layouts: &[(&[usize], &[usize], usize)] = &[
+            (&[2, 3, 2, 2], &[1, 2, 6, 12], 24),
+            (&[3, 2, 2], &[2, 1, 6], 12),
+            (&[2, 1, 3], &[1, 17, 2], 6),
+            (&[2, 3], &[1, 4], 10),
+        ];
+        for &(shape, strides, storage_len) in layouts {
+            let data: Vec<u32> = (0..storage_len as u32).collect();
+            let mut perm: Vec<usize> = (0..shape.len()).collect();
+            loop {
+                let mut scratch = Vec::new();
+                let actual =
+                    materialize_with_permutation_into(&data, shape, strides, &perm, &mut scratch);
+                assert_eq!(
+                    actual.as_slice(),
+                    scalar_reference(&data, shape, strides, &perm),
+                    "shape={shape:?}, strides={strides:?}, perm={perm:?}"
+                );
+                if !next_permutation(&mut perm) {
+                    break;
+                }
+            }
+        }
+    }
+
+    #[test]
     fn test_materialize_with_permutation_does_not_allocate_per_element() {
-        let data: Vec<u32> = (0..64).collect();
-        let shape = [2, 2, 2, 2, 2, 2];
-        let strides = [1, 2, 4, 8, 16, 32];
+        let data: Vec<u32> = (0..4096).collect();
+        let shape = [4, 4, 4, 4, 4, 4];
+        let strides = [1, 4, 16, 64, 256, 1024];
         let perm = [5, 3, 1, 4, 2, 0];
         let mut scratch = Vec::with_capacity(data.len());
 
@@ -875,8 +982,19 @@ mod tests {
 
         assert_eq!(len, data.len());
         assert!(
-            allocations <= 4,
-            "expected a bounded number of allocations, got {allocations}"
+            allocations <= 32,
+            "expected a bounded number of metadata allocations, got {allocations}"
         );
+    }
+
+    #[test]
+    fn test_materialize_with_permutation_handles_zero_sized_shape() {
+        let mut scratch = vec![42u32];
+        {
+            let materialized =
+                materialize_with_permutation_into(&[], &[0, 3], &[1, 0], &[1, 0], &mut scratch);
+            assert!(materialized.as_slice().is_empty());
+        }
+        assert!(scratch.is_empty());
     }
 }
