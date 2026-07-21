@@ -6,7 +6,7 @@
 use super::handle::*;
 use super::sys::cutensorContract;
 use super::{check, CutensorError};
-use cudarc::driver::{CudaSlice, DevicePtr};
+use cudarc::driver::{CudaSlice, DevicePtr, DevicePtrMut};
 use std::collections::HashMap;
 
 /// Cache key for identifying unique tensor contraction configurations.
@@ -130,11 +130,12 @@ pub fn contract<T>(
 where
     T: CutensorType + cudarc::driver::DeviceRepr + num_traits::Zero,
 {
-    // Allocate workspace if needed
-    let workspace = if plan.workspace_size > 0 {
+    let stream = handle.stream();
+
+    // Allocate workspace if needed (cudarc 0.19: allocations live on the stream).
+    let mut workspace = if plan.workspace_size > 0 {
         Some(
-            handle
-                .device()
+            stream
                 .alloc_zeros::<u8>(plan.workspace_size as usize)
                 .map_err(|e| CutensorError::Other(format!("Workspace allocation failed: {}", e)))?,
         )
@@ -142,10 +143,22 @@ where
         None
     };
 
-    let ws_ptr = workspace
-        .as_ref()
-        .map(|w| *w.device_ptr() as *mut std::ffi::c_void)
-        .unwrap_or(std::ptr::null_mut());
+    // cudarc 0.19 device-pointer extraction: `device_ptr(stream)` returns the raw
+    // `CUdeviceptr` plus a `SyncOnDrop` guard that orders the stream against this
+    // access on drop. The guards (`_*_guard`) are bound for the whole unsafe call
+    // so the pointers stay valid until cuTENSOR has been launched. `c` is the only
+    // written buffer, so it uses the mutable accessor; the same pointer feeds both
+    // the C (read, unused since beta=0) and D (write) arguments, as before.
+    let (ws_ptr, _ws_guard) = match workspace.as_mut() {
+        Some(w) => {
+            let (p, g) = w.device_ptr_mut(stream);
+            (p as *mut std::ffi::c_void, Some(g))
+        }
+        None => (std::ptr::null_mut(), None),
+    };
+    let (a_ptr, _a_guard) = a.device_ptr(stream);
+    let (b_ptr, _b_guard) = b.device_ptr(stream);
+    let (c_ptr, _c_guard) = c.device_ptr_mut(stream);
 
     // beta = 0: completely overwrite output rather than accumulating
     let beta = T::zero();
@@ -155,14 +168,17 @@ where
             handle.raw(),
             plan.raw(),
             &alpha as *const T as *const _,
-            *a.device_ptr() as *const _,
-            *b.device_ptr() as *const _,
+            a_ptr as *const _,
+            b_ptr as *const _,
             &beta as *const T as *const _,
-            *c.device_ptr() as *const _,
-            *c.device_ptr() as *mut _,
+            c_ptr as *const _,
+            c_ptr as *mut _,
             ws_ptr,
             plan.workspace_size,
-            std::ptr::null_mut(), // default stream
+            // cuTENSOR's FFI types the stream as an opaque `void*` (cudaStream_t);
+            // cast cudarc's `CUstream` handle to match. Runs on the handle's
+            // stream rather than the default stream.
+            stream.cu_stream() as *mut std::ffi::c_void,
         )
     })
 }

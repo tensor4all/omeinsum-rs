@@ -1,20 +1,21 @@
 //! CUDA storage implementation for GPU memory management.
 
-use cudarc::driver::{CudaDevice, CudaSlice, DeviceRepr, DeviceSlice, DriverError};
+use cudarc::driver::{CudaSlice, CudaStream, DeviceRepr, DriverError};
 use std::sync::Arc;
 
 /// GPU memory storage backed by CUDA.
 ///
-/// Provides a wrapper around cudarc's `CudaSlice` with device reference tracking.
+/// Wraps cudarc's `CudaSlice` together with the stream that owns its allocation
+/// and transfers (cudarc 0.19 moved memory ops from the device onto the stream).
 pub struct CudaStorage<T> {
     slice: CudaSlice<T>,
-    device: Arc<CudaDevice>,
+    stream: Arc<CudaStream>,
 }
 
 impl<T> CudaStorage<T> {
-    /// Create a new CudaStorage from a CudaSlice and device reference.
-    pub fn new(slice: CudaSlice<T>, device: Arc<CudaDevice>) -> Self {
-        Self { slice, device }
+    /// Create a new CudaStorage from a CudaSlice and the owning stream.
+    pub fn new(slice: CudaSlice<T>, stream: Arc<CudaStream>) -> Self {
+        Self { slice, stream }
     }
 
     /// Get a reference to the underlying CUDA slice.
@@ -27,9 +28,9 @@ impl<T> CudaStorage<T> {
         &mut self.slice
     }
 
-    /// Get a reference to the CUDA device.
-    pub fn device(&self) -> &Arc<CudaDevice> {
-        &self.device
+    /// Get the stream that owns this storage.
+    pub fn stream(&self) -> &Arc<CudaStream> {
+        &self.stream
     }
 
     /// Number of elements in storage.
@@ -50,18 +51,22 @@ impl<T: DeviceRepr + Clone> CudaStorage<T> {
     ///
     /// Returns a `DriverError` if the CUDA device-to-host copy fails.
     pub fn to_vec(&self) -> Result<Vec<T>, DriverError> {
-        self.device.dtoh_sync_copy(&self.slice)
+        let host = self.stream.clone_dtoh(&self.slice)?;
+        // Ensure the (async) D2H copy lands before the caller reads `host`.
+        // Replaces cudarc 0.12's `dtoh_sync_copy`.
+        self.stream.synchronize()?;
+        Ok(host)
     }
 }
 
 // SAFETY: CudaStorage<T> can be sent between threads because:
 // - CudaSlice<T> internally uses a CUDA device pointer which is thread-safe
-// - Arc<CudaDevice> is Send
+// - Arc<CudaStream> is Send
 // The actual GPU memory is managed by the CUDA runtime which handles synchronization.
 unsafe impl<T: Send> Send for CudaStorage<T> {}
 
 // SAFETY: CudaStorage<T> can be shared between threads because:
 // - CudaSlice<T> only provides immutable access through &self methods
-// - Arc<CudaDevice> is Sync
+// - Arc<CudaStream> is Sync
 // - CUDA operations are synchronized by the runtime
 unsafe impl<T: Sync> Sync for CudaStorage<T> {}

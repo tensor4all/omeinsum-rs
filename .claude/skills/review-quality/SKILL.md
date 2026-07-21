@@ -1,6 +1,6 @@
 ---
 name: review-quality
-description: Generic code quality review for omeinsum-rs — evaluates correctness, DRY, KISS, cohesion/coupling, and test quality. Read-only, no code changes.
+description: Use when reviewing omeinsum-rs code changes for correctness, DRY, KISS, cohesion/coupling, CLI/HCI quality, and test quality
 ---
 
 # Quality Review
@@ -8,6 +8,13 @@ description: Generic code quality review for omeinsum-rs — evaluates correctne
 Read-only review workflow for `omeinsum-rs`.
 
 This skill reports issues. It does not edit files, commit, or push.
+
+## Invocation
+
+- `/review-quality` - auto-detect the review range from git
+- `/review-quality <base>..<head>` - review a specific diff range
+
+For Codex, open this `SKILL.md` directly and treat slash-command forms as aliases.
 
 ## Step 1: Get Context
 
@@ -63,7 +70,16 @@ Flag:
 - modules that reach into each other's internals when a helper boundary would suffice
 - long functions doing both lowering and execution when those responsibilities can be separated cleanly
 
-## Step 4: Evaluate Test Quality
+## Step 4: Evaluate CLI / HCI Quality
+
+Only check these if the diff touches `omeinsum-cli/` or CLI docs:
+
+- Error messages should explain the invalid input and the expected format.
+- JSON output should stay stable and documented.
+- `optimize`, `contract`, and `autodiff` behavior should be consistent between expression and topology inputs.
+- Non-scalar autodiff should require an explicit gradient seed with a clear error.
+
+## Step 5: Evaluate Test Quality
 
 Flag tests that:
 
@@ -87,6 +103,9 @@ Prefer small exact tensors with hand-checkable expected values.
 - DRY: OK / ISSUE — description with file:line
 - KISS: OK / ISSUE — description with file:line
 - HC/LC: OK / ISSUE — description with file:line
+
+### CLI / HCI
+- OK / ISSUE — description with file:line, or N/A
 
 ### Test Quality
 - OK / ISSUE — description with test file references

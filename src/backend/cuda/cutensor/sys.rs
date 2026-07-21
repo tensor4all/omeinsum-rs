@@ -27,6 +27,9 @@
 //! Make sure to set `CUTENSOR_PATH` to the directory containing `libcutensor.so`.
 
 #![allow(non_camel_case_types)]
+// FFI enum variants (`SUCCESS`, `IDENTITY`, `DEFAULT`, `NONE`, …) mirror the
+// cuTENSOR C API names verbatim; keep them as-is rather than renaming bindings.
+#![allow(clippy::upper_case_acronyms)]
 
 use std::ffi::c_void;
 

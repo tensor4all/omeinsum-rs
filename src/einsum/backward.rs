@@ -14,7 +14,7 @@
 //! This elegantly handles trace, sum, diagonal, transpose, and their gradients.
 
 use crate::algebra::{Algebra, Scalar};
-use crate::backend::{Backend, BackendScalar, Storage};
+use crate::backend::{Backend, BackendScalar};
 use crate::tensor::Tensor;
 use std::collections::HashMap;
 
@@ -118,12 +118,9 @@ where
         let winner_coords = linear_to_coords(argmax_vec[out_linear] as usize, &contracted_shape);
 
         let output_positions: HashMap<usize, usize> =
-            iy.iter().copied().zip(output_coords.into_iter()).collect();
-        let contracted_positions: HashMap<usize, usize> = contracted
-            .iter()
-            .copied()
-            .zip(winner_coords.into_iter())
-            .collect();
+            iy.iter().copied().zip(output_coords).collect();
+        let contracted_positions: HashMap<usize, usize> =
+            contracted.iter().copied().zip(winner_coords).collect();
 
         let a_coords: Vec<usize> = ia
             .iter()
@@ -152,16 +149,11 @@ where
         grad_b_vec[b_linear] += grad_val;
     }
 
-    let grad_a = Tensor::from_storage(
-        B::Storage::from_slice(&grad_a_vec),
-        a.shape(),
-        a.backend().clone(),
-    );
-    let grad_b = Tensor::from_storage(
-        B::Storage::from_slice(&grad_b_vec),
-        b.shape(),
-        b.backend().clone(),
-    );
+    // Build the gradient storage *through the backend* (which owns the device
+    // context) rather than the context-free `Storage::from_slice`, so the
+    // gradients land on the same backend/device as the inputs (e.g. CUDA).
+    let grad_a = Tensor::from_data_with_backend(&grad_a_vec, a.shape(), a.backend().clone());
+    let grad_b = Tensor::from_data_with_backend(&grad_b_vec, b.shape(), b.backend().clone());
     (grad_a, grad_b)
 }
 

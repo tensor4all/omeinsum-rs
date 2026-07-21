@@ -16,6 +16,10 @@
 //! If CUDA is not available, these tests will not be compiled.
 
 #![cfg(feature = "cuda")]
+// This suite builds many small fixed test tensors with `vec![…]` for readability;
+// they are passed to the backend as slices, so clippy flags them as `useless_vec`.
+// Keep the literal form — it reads better than `[…]` arrays for tensor fixtures.
+#![allow(clippy::useless_vec)]
 
 use omeinsum::backend::{Cpu, Cuda, CudaComplex, CudaStorage};
 use std::collections::HashMap;
@@ -48,8 +52,8 @@ fn test_cuda_init() {
 fn test_storage_roundtrip_f32() {
     let cuda = Cuda::new().unwrap();
     let data = vec![1.0f32, 2.0, 3.0, 4.0];
-    let slice = cuda.device().htod_sync_copy(&data).unwrap();
-    let storage = CudaStorage::new(slice, cuda.device().clone());
+    let slice = cuda.stream().clone_htod(&data).unwrap();
+    let storage = CudaStorage::new(slice, cuda.stream().clone());
     assert_eq!(storage.to_vec().unwrap(), data);
 }
 
@@ -58,8 +62,8 @@ fn test_storage_roundtrip_f32() {
 fn test_storage_roundtrip_f64() {
     let cuda = Cuda::new().unwrap();
     let data = vec![1.0f64, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0];
-    let slice = cuda.device().htod_sync_copy(&data).unwrap();
-    let storage = CudaStorage::new(slice, cuda.device().clone());
+    let slice = cuda.stream().clone_htod(&data).unwrap();
+    let storage = CudaStorage::new(slice, cuda.stream().clone());
     assert_eq!(storage.to_vec().unwrap(), data);
 }
 
@@ -77,12 +81,12 @@ fn test_matmul_f32() {
     let b_data = vec![1.0f32, 2.0, 3.0, 4.0, 5.0, 6.0];
 
     let a = CudaStorage::new(
-        cuda.device().htod_sync_copy(&a_data).unwrap(),
-        cuda.device().clone(),
+        cuda.stream().clone_htod(&a_data).unwrap(),
+        cuda.stream().clone(),
     );
     let b = CudaStorage::new(
-        cuda.device().htod_sync_copy(&b_data).unwrap(),
-        cuda.device().clone(),
+        cuda.stream().clone_htod(&b_data).unwrap(),
+        cuda.stream().clone(),
     );
 
     // C[i,k] = sum_j A[i,j] * B[j,k]
@@ -123,12 +127,12 @@ fn test_matmul_f64() {
     let b_data = vec![5.0f64, 6.0, 7.0, 8.0];
 
     let a = CudaStorage::new(
-        cuda.device().htod_sync_copy(&a_data).unwrap(),
-        cuda.device().clone(),
+        cuda.stream().clone_htod(&a_data).unwrap(),
+        cuda.stream().clone(),
     );
     let b = CudaStorage::new(
-        cuda.device().htod_sync_copy(&b_data).unwrap(),
-        cuda.device().clone(),
+        cuda.stream().clone_htod(&b_data).unwrap(),
+        cuda.stream().clone(),
     );
 
     // C[i,k] = sum_j A[i,j] * B[j,k]
@@ -189,12 +193,12 @@ fn test_inner_product() {
     let b_data = vec![2.0f32, 3.0, 4.0, 5.0];
 
     let a = CudaStorage::new(
-        cuda.device().htod_sync_copy(&a_data).unwrap(),
-        cuda.device().clone(),
+        cuda.stream().clone_htod(&a_data).unwrap(),
+        cuda.stream().clone(),
     );
     let b = CudaStorage::new(
-        cuda.device().htod_sync_copy(&b_data).unwrap(),
-        cuda.device().clone(),
+        cuda.stream().clone_htod(&b_data).unwrap(),
+        cuda.stream().clone(),
     );
 
     // c = sum_i A[i] * B[i]
@@ -239,12 +243,12 @@ fn test_outer_product() {
     let b_data = vec![4.0f32, 5.0];
 
     let a = CudaStorage::new(
-        cuda.device().htod_sync_copy(&a_data).unwrap(),
-        cuda.device().clone(),
+        cuda.stream().clone_htod(&a_data).unwrap(),
+        cuda.stream().clone(),
     );
     let b = CudaStorage::new(
-        cuda.device().htod_sync_copy(&b_data).unwrap(),
-        cuda.device().clone(),
+        cuda.stream().clone_htod(&b_data).unwrap(),
+        cuda.stream().clone(),
     );
 
     // C[i,j] = A[i] * B[j] (no contraction, just outer product)
@@ -297,12 +301,12 @@ fn test_batch_matmul() {
     ];
 
     let a = CudaStorage::new(
-        cuda.device().htod_sync_copy(&a_data).unwrap(),
-        cuda.device().clone(),
+        cuda.stream().clone_htod(&a_data).unwrap(),
+        cuda.stream().clone(),
     );
     let b = CudaStorage::new(
-        cuda.device().htod_sync_copy(&b_data).unwrap(),
-        cuda.device().clone(),
+        cuda.stream().clone_htod(&b_data).unwrap(),
+        cuda.stream().clone(),
     );
 
     // C[b,i,k] = sum_j A[b,i,j] * B[b,j,k]
@@ -347,8 +351,8 @@ fn test_storage_len() {
     let cuda = Cuda::new().unwrap();
 
     let data = vec![1.0f32, 2.0, 3.0];
-    let slice = cuda.device().htod_sync_copy(&data).unwrap();
-    let storage = CudaStorage::new(slice, cuda.device().clone());
+    let slice = cuda.stream().clone_htod(&data).unwrap();
+    let storage = CudaStorage::new(slice, cuda.stream().clone());
 
     assert_eq!(storage.len(), 3);
     assert!(!storage.is_empty());
@@ -371,12 +375,12 @@ fn test_tensor3_contraction_f64() {
     let b_data: Vec<f64> = (1..=8).map(|x| x as f64).collect();
 
     let a = CudaStorage::new(
-        cuda.device().htod_sync_copy(&a_data).unwrap(),
-        cuda.device().clone(),
+        cuda.stream().clone_htod(&a_data).unwrap(),
+        cuda.stream().clone(),
     );
     let b = CudaStorage::new(
-        cuda.device().htod_sync_copy(&b_data).unwrap(),
-        cuda.device().clone(),
+        cuda.stream().clone_htod(&b_data).unwrap(),
+        cuda.stream().clone(),
     );
 
     // C[i,l] = sum_{j,k} A[i,j,k] * B[j,k,l]
@@ -420,8 +424,8 @@ fn test_trace_f64() {
     let a_data: Vec<f64> = (1..=9).map(|x| x as f64).collect();
 
     let a = CudaStorage::new(
-        cuda.device().htod_sync_copy(&a_data).unwrap(),
-        cuda.device().clone(),
+        cuda.stream().clone_htod(&a_data).unwrap(),
+        cuda.stream().clone(),
     );
 
     // For trace, we need both indices to be the same (contracted)
@@ -432,8 +436,8 @@ fn test_trace_f64() {
     // Instead, let's test a simple reduction: sum all elements
     // This is also useful to verify
     let identity = CudaStorage::new(
-        cuda.device().htod_sync_copy(&[1.0f64]).unwrap(),
-        cuda.device().clone(),
+        cuda.stream().clone_htod(&[1.0f64]).unwrap(),
+        cuda.stream().clone(),
     );
 
     // c = sum_{i,j} A[i,j] * 1
@@ -486,12 +490,12 @@ fn test_cuda_manual_backward_matmul_f64() {
     let b_data = vec![1.0f64, 2.0, 3.0, 4.0];
 
     let a = CudaStorage::new(
-        cuda.device().htod_sync_copy(&a_data).unwrap(),
-        cuda.device().clone(),
+        cuda.stream().clone_htod(&a_data).unwrap(),
+        cuda.stream().clone(),
     );
     let b = CudaStorage::new(
-        cuda.device().htod_sync_copy(&b_data).unwrap(),
-        cuda.device().clone(),
+        cuda.stream().clone_htod(&b_data).unwrap(),
+        cuda.stream().clone(),
     );
 
     // Forward pass: C = A @ B
@@ -521,8 +525,8 @@ fn test_cuda_manual_backward_matmul_f64() {
     // Backward pass with grad_out = [[1, 1], [1, 1]]
     let grad_out_data = vec![1.0f64, 1.0, 1.0, 1.0];
     let grad_out = CudaStorage::new(
-        cuda.device().htod_sync_copy(&grad_out_data).unwrap(),
-        cuda.device().clone(),
+        cuda.stream().clone_htod(&grad_out_data).unwrap(),
+        cuda.stream().clone(),
     );
 
     // grad_A = grad_C @ B^T
@@ -628,12 +632,12 @@ fn test_cuda_manual_backward_rectangular_f64() {
     let b_data = vec![1.0f64, 2.0, 3.0, 4.0, 5.0, 6.0];
 
     let a = CudaStorage::new(
-        cuda.device().htod_sync_copy(&a_data).unwrap(),
-        cuda.device().clone(),
+        cuda.stream().clone_htod(&a_data).unwrap(),
+        cuda.stream().clone(),
     );
     let b = CudaStorage::new(
-        cuda.device().htod_sync_copy(&b_data).unwrap(),
-        cuda.device().clone(),
+        cuda.stream().clone_htod(&b_data).unwrap(),
+        cuda.stream().clone(),
     );
 
     // Forward pass: C = A @ B (2x3 @ 3x2 = 2x2)
@@ -663,8 +667,8 @@ fn test_cuda_manual_backward_rectangular_f64() {
     // Backward pass with grad_out = [[1, 1], [1, 1]]
     let grad_out_data = vec![1.0f64, 1.0, 1.0, 1.0];
     let grad_out = CudaStorage::new(
-        cuda.device().htod_sync_copy(&grad_out_data).unwrap(),
-        cuda.device().clone(),
+        cuda.stream().clone_htod(&grad_out_data).unwrap(),
+        cuda.stream().clone(),
     );
 
     // grad_A = grad_C @ B^T (2x2 @ 2x3 = 2x3)
@@ -738,12 +742,12 @@ fn test_cuda_manual_backward_outer_product_f64() {
     let b_data = vec![3.0f64, 4.0, 5.0];
 
     let a = CudaStorage::new(
-        cuda.device().htod_sync_copy(&a_data).unwrap(),
-        cuda.device().clone(),
+        cuda.stream().clone_htod(&a_data).unwrap(),
+        cuda.stream().clone(),
     );
     let b = CudaStorage::new(
-        cuda.device().htod_sync_copy(&b_data).unwrap(),
-        cuda.device().clone(),
+        cuda.stream().clone_htod(&b_data).unwrap(),
+        cuda.stream().clone(),
     );
 
     // Forward: C[i,j] = A[i] * B[j]
@@ -776,8 +780,8 @@ fn test_cuda_manual_backward_outer_product_f64() {
     // Backward with grad_out = ones (2x3)
     let grad_out_data = vec![1.0f64; 6];
     let grad_out = CudaStorage::new(
-        cuda.device().htod_sync_copy(&grad_out_data).unwrap(),
-        cuda.device().clone(),
+        cuda.stream().clone_htod(&grad_out_data).unwrap(),
+        cuda.stream().clone(),
     );
 
     // grad_A[i] = sum_j grad_C[i,j] * B[j]
@@ -844,8 +848,8 @@ fn test_storage_roundtrip_complex64() {
         CudaComplex::new(7.0, 8.0),
     ];
 
-    let slice = cuda.device().htod_sync_copy(&data).unwrap();
-    let storage = CudaStorage::new(slice, cuda.device().clone());
+    let slice = cuda.stream().clone_htod(&data).unwrap();
+    let storage = CudaStorage::new(slice, cuda.stream().clone());
     let result = storage.to_vec().unwrap();
 
     assert_eq!(result.len(), data.len());
@@ -867,8 +871,8 @@ fn test_storage_roundtrip_complex32() {
         CudaComplex::new(7.0, 8.0),
     ];
 
-    let slice = cuda.device().htod_sync_copy(&data).unwrap();
-    let storage = CudaStorage::new(slice, cuda.device().clone());
+    let slice = cuda.stream().clone_htod(&data).unwrap();
+    let storage = CudaStorage::new(slice, cuda.stream().clone());
     let result = storage.to_vec().unwrap();
 
     assert_eq!(result.len(), data.len());
@@ -901,12 +905,12 @@ fn test_matmul_complex64() {
     ];
 
     let a = CudaStorage::new(
-        cuda.device().htod_sync_copy(&a_data).unwrap(),
-        cuda.device().clone(),
+        cuda.stream().clone_htod(&a_data).unwrap(),
+        cuda.stream().clone(),
     );
     let b = CudaStorage::new(
-        cuda.device().htod_sync_copy(&b_data).unwrap(),
-        cuda.device().clone(),
+        cuda.stream().clone_htod(&b_data).unwrap(),
+        cuda.stream().clone(),
     );
 
     // C[i,k] = sum_j A[i,j] * B[j,k]
@@ -974,12 +978,12 @@ fn test_inner_product_complex64() {
         vec![CudaComplex::new(1.0, -1.0), CudaComplex::new(0.0, 1.0)];
 
     let a = CudaStorage::new(
-        cuda.device().htod_sync_copy(&a_data).unwrap(),
-        cuda.device().clone(),
+        cuda.stream().clone_htod(&a_data).unwrap(),
+        cuda.stream().clone(),
     );
     let b = CudaStorage::new(
-        cuda.device().htod_sync_copy(&b_data).unwrap(),
-        cuda.device().clone(),
+        cuda.stream().clone_htod(&b_data).unwrap(),
+        cuda.stream().clone(),
     );
 
     // c = sum_i A[i] * B[i]
@@ -1036,12 +1040,12 @@ fn test_outer_product_complex64() {
         vec![CudaComplex::new(0.0, 1.0), CudaComplex::new(1.0, -1.0)];
 
     let a = CudaStorage::new(
-        cuda.device().htod_sync_copy(&a_data).unwrap(),
-        cuda.device().clone(),
+        cuda.stream().clone_htod(&a_data).unwrap(),
+        cuda.stream().clone(),
     );
     let b = CudaStorage::new(
-        cuda.device().htod_sync_copy(&b_data).unwrap(),
-        cuda.device().clone(),
+        cuda.stream().clone_htod(&b_data).unwrap(),
+        cuda.stream().clone(),
     );
 
     // C[i,j] = A[i] * B[j]
@@ -1118,12 +1122,12 @@ fn test_cuda_manual_backward_matmul_complex64() {
     ];
 
     let a = CudaStorage::new(
-        cuda.device().htod_sync_copy(&a_data).unwrap(),
-        cuda.device().clone(),
+        cuda.stream().clone_htod(&a_data).unwrap(),
+        cuda.stream().clone(),
     );
     let b = CudaStorage::new(
-        cuda.device().htod_sync_copy(&b_data).unwrap(),
-        cuda.device().clone(),
+        cuda.stream().clone_htod(&b_data).unwrap(),
+        cuda.stream().clone(),
     );
 
     // Forward: C = A @ I = A
@@ -1156,8 +1160,8 @@ fn test_cuda_manual_backward_matmul_complex64() {
         CudaComplex::new(1.0, 0.0),
     ];
     let grad_out = CudaStorage::new(
-        cuda.device().htod_sync_copy(&grad_out_data).unwrap(),
-        cuda.device().clone(),
+        cuda.stream().clone_htod(&grad_out_data).unwrap(),
+        cuda.stream().clone(),
     );
 
     // grad_A = grad_C @ B^T = grad_C @ I = grad_C = ones
@@ -2306,12 +2310,12 @@ fn test_cuda_backward_matmul_identity() {
     let identity_data = vec![1.0f64, 0.0, 0.0, 1.0];
 
     let a = CudaStorage::new(
-        cuda.device().htod_sync_copy(&a_data).unwrap(),
-        cuda.device().clone(),
+        cuda.stream().clone_htod(&a_data).unwrap(),
+        cuda.stream().clone(),
     );
     let identity = CudaStorage::new(
-        cuda.device().htod_sync_copy(&identity_data).unwrap(),
-        cuda.device().clone(),
+        cuda.stream().clone_htod(&identity_data).unwrap(),
+        cuda.stream().clone(),
     );
 
     // Forward: C = A @ I = A
@@ -2337,8 +2341,8 @@ fn test_cuda_backward_matmul_identity() {
     // Backward with grad_out = [[1, 0], [0, 1]] (identity)
     let grad_out_data = vec![1.0f64, 0.0, 0.0, 1.0];
     let grad_out = CudaStorage::new(
-        cuda.device().htod_sync_copy(&grad_out_data).unwrap(),
-        cuda.device().clone(),
+        cuda.stream().clone_htod(&grad_out_data).unwrap(),
+        cuda.stream().clone(),
     );
 
     // grad_A = grad_C @ B^T = I @ I = I
@@ -2375,12 +2379,12 @@ fn test_cuda_backward_matmul_ones_gradient() {
     let b_data = vec![5.0f64, 6.0, 7.0, 8.0];
 
     let a = CudaStorage::new(
-        cuda.device().htod_sync_copy(&a_data).unwrap(),
-        cuda.device().clone(),
+        cuda.stream().clone_htod(&a_data).unwrap(),
+        cuda.stream().clone(),
     );
     let b = CudaStorage::new(
-        cuda.device().htod_sync_copy(&b_data).unwrap(),
-        cuda.device().clone(),
+        cuda.stream().clone_htod(&b_data).unwrap(),
+        cuda.stream().clone(),
     );
 
     // Forward: C = A @ B
@@ -2406,8 +2410,8 @@ fn test_cuda_backward_matmul_ones_gradient() {
     // Backward with grad_out = all ones
     let grad_out_data = vec![1.0f64; 4];
     let grad_out = CudaStorage::new(
-        cuda.device().htod_sync_copy(&grad_out_data).unwrap(),
-        cuda.device().clone(),
+        cuda.stream().clone_htod(&grad_out_data).unwrap(),
+        cuda.stream().clone(),
     );
 
     // grad_A = grad_C @ B^T
@@ -2465,12 +2469,12 @@ fn test_cuda_backward_large_values_f64() {
     let b_data = vec![1.0f64, 2.0, 3.0, 4.0];
 
     let a = CudaStorage::new(
-        cuda.device().htod_sync_copy(&a_data).unwrap(),
-        cuda.device().clone(),
+        cuda.stream().clone_htod(&a_data).unwrap(),
+        cuda.stream().clone(),
     );
     let b = CudaStorage::new(
-        cuda.device().htod_sync_copy(&b_data).unwrap(),
-        cuda.device().clone(),
+        cuda.stream().clone_htod(&b_data).unwrap(),
+        cuda.stream().clone(),
     );
 
     // Forward: C = A @ B
@@ -2496,8 +2500,8 @@ fn test_cuda_backward_large_values_f64() {
     // Backward
     let grad_out_data = vec![1.0f64; 4];
     let grad_out = CudaStorage::new(
-        cuda.device().htod_sync_copy(&grad_out_data).unwrap(),
-        cuda.device().clone(),
+        cuda.stream().clone_htod(&grad_out_data).unwrap(),
+        cuda.stream().clone(),
     );
 
     let grad_a = cuda
@@ -2535,12 +2539,12 @@ fn test_cuda_backward_all_matmul_transposes() {
     // Test 1: ij,jk->ik (standard matmul)
     {
         let a = CudaStorage::new(
-            cuda.device().htod_sync_copy(&a_data).unwrap(),
-            cuda.device().clone(),
+            cuda.stream().clone_htod(&a_data).unwrap(),
+            cuda.stream().clone(),
         );
         let b = CudaStorage::new(
-            cuda.device().htod_sync_copy(&b_data).unwrap(),
-            cuda.device().clone(),
+            cuda.stream().clone_htod(&b_data).unwrap(),
+            cuda.stream().clone(),
         );
 
         let c = cuda
@@ -2565,12 +2569,12 @@ fn test_cuda_backward_all_matmul_transposes() {
     // Test 2: ij,kj->ik (B transposed via index mapping)
     {
         let a = CudaStorage::new(
-            cuda.device().htod_sync_copy(&a_data).unwrap(),
-            cuda.device().clone(),
+            cuda.stream().clone_htod(&a_data).unwrap(),
+            cuda.stream().clone(),
         );
         let b = CudaStorage::new(
-            cuda.device().htod_sync_copy(&b_data).unwrap(),
-            cuda.device().clone(),
+            cuda.stream().clone_htod(&b_data).unwrap(),
+            cuda.stream().clone(),
         );
 
         let c = cuda
@@ -2595,12 +2599,12 @@ fn test_cuda_backward_all_matmul_transposes() {
     // Test 3: ji,jk->ik (A transposed via index mapping)
     {
         let a = CudaStorage::new(
-            cuda.device().htod_sync_copy(&a_data).unwrap(),
-            cuda.device().clone(),
+            cuda.stream().clone_htod(&a_data).unwrap(),
+            cuda.stream().clone(),
         );
         let b = CudaStorage::new(
-            cuda.device().htod_sync_copy(&b_data).unwrap(),
-            cuda.device().clone(),
+            cuda.stream().clone_htod(&b_data).unwrap(),
+            cuda.stream().clone(),
         );
 
         let c = cuda
@@ -2625,12 +2629,12 @@ fn test_cuda_backward_all_matmul_transposes() {
     // Test 4: ji,kj->ik (both transposed)
     {
         let a = CudaStorage::new(
-            cuda.device().htod_sync_copy(&a_data).unwrap(),
-            cuda.device().clone(),
+            cuda.stream().clone_htod(&a_data).unwrap(),
+            cuda.stream().clone(),
         );
         let b = CudaStorage::new(
-            cuda.device().htod_sync_copy(&b_data).unwrap(),
-            cuda.device().clone(),
+            cuda.stream().clone_htod(&b_data).unwrap(),
+            cuda.stream().clone(),
         );
 
         let c = cuda
@@ -2665,16 +2669,16 @@ fn test_cuda_backward_3tensor_chain() {
     let c_data = vec![2.0f64, 0.0, 0.0, 2.0]; // 2*Identity
 
     let a = CudaStorage::new(
-        cuda.device().htod_sync_copy(&a_data).unwrap(),
-        cuda.device().clone(),
+        cuda.stream().clone_htod(&a_data).unwrap(),
+        cuda.stream().clone(),
     );
     let b = CudaStorage::new(
-        cuda.device().htod_sync_copy(&b_data).unwrap(),
-        cuda.device().clone(),
+        cuda.stream().clone_htod(&b_data).unwrap(),
+        cuda.stream().clone(),
     );
     let c_tensor = CudaStorage::new(
-        cuda.device().htod_sync_copy(&c_data).unwrap(),
-        cuda.device().clone(),
+        cuda.stream().clone_htod(&c_data).unwrap(),
+        cuda.stream().clone(),
     );
 
     // First: AB = A @ B
@@ -2729,8 +2733,8 @@ fn test_cuda_backward_3tensor_chain() {
     // Backward with grad_out = ones
     let grad_out_data = vec![1.0f64; 4];
     let grad_out = CudaStorage::new(
-        cuda.device().htod_sync_copy(&grad_out_data).unwrap(),
-        cuda.device().clone(),
+        cuda.stream().clone_htod(&grad_out_data).unwrap(),
+        cuda.stream().clone(),
     );
 
     // grad_AB = grad_out @ C^T
@@ -3361,7 +3365,7 @@ fn test_cuda_error_init_handling() {
     match result {
         Ok(cuda) => {
             // Verify the device is valid
-            let device = cuda.device();
+            let device = cuda.context();
             assert!(device.ordinal() == 0);
         }
         Err(e) => {
@@ -3380,8 +3384,8 @@ fn test_cuda_error_memory_operations() {
     // Create a normal tensor - should succeed
     let data = vec![1.0f64, 2.0, 3.0, 4.0];
     let storage = CudaStorage::new(
-        cuda.device().htod_sync_copy(&data).unwrap(),
-        cuda.device().clone(),
+        cuda.stream().clone_htod(&data).unwrap(),
+        cuda.stream().clone(),
     );
 
     // Verify we can read it back

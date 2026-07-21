@@ -1,11 +1,17 @@
 ---
 name: fix-pr
-description: Resolve PR review comments, local CI failures, and coverage gaps for omeinsum-rs
+description: Use when an omeinsum-rs pull request has review comments, local CI failures, or coverage gaps to address
 ---
 
 # Fix PR
 
 Workflow for cleaning up the current PR after review or CI feedback.
+
+## Invocation
+
+- `/fix-pr` - fix feedback on the current branch's PR
+
+For Codex, open this `SKILL.md` directly and treat slash-command forms as aliases.
 
 ## Step 1: Gather PR State
 
@@ -13,12 +19,14 @@ Confirm there is an open PR for the current branch:
 
 ```bash
 BRANCH=$(git branch --show-current)
-gh pr view --json number,title,url,baseRefName,headRefName
+gh pr view --json number,title,url,baseRefName,headRefName,headRefOid
 gh pr view --comments
 gh pr checks
 ```
 
 If there is no PR, stop and report that first.
+
+Read inline review comments, PR conversation comments, linked issue comments referenced by reviewers, CI failures, and Codecov comments. Do not assume `gh pr view --comments` is the only feedback surface if the user points to another source.
 
 ## Step 2: Triage Findings
 
@@ -56,7 +64,7 @@ For each valid comment:
 - implement the minimal fix
 - rerun the narrowest relevant tests first, then the broader gate
 
-If a comment is technically wrong, do not silently apply it. Record the reasoning for why it should be declined.
+If a comment is technically wrong, do not silently apply it. Record the reasoning for why it should be declined, and do not rewrite unrelated code while addressing it.
 
 ## Step 5: Close Coverage Gaps
 
@@ -83,4 +91,4 @@ If tropical paths changed, also rerun:
 cargo test --features tropical
 ```
 
-Commit with a message that states what class of PR feedback was addressed.
+Commit with a message that states what class of PR feedback was addressed. If no commit is requested, leave the worktree changes in place and report them clearly.

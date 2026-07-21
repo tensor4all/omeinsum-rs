@@ -68,7 +68,7 @@ pub mod tensor;
 pub(crate) mod test_support;
 
 // Re-exports
-pub use algebra::{Algebra, Complex32, Complex64, Semiring, Standard};
+pub use algebra::{Algebra, Complex32, Complex64, GenericSemiring, Semiring, Standard};
 pub use backend::{Backend, BackendScalar, Cpu, Storage};
 pub use einsum::{cost_and_gradient, einsum, einsum_with_grad, EinBuilder, Einsum};
 pub use tensor::{Tensor, TensorView};
@@ -76,5 +76,5 @@ pub use tensor::{Tensor, TensorView};
 #[cfg(feature = "tropical")]
 pub use algebra::{MaxMul, MaxPlus, MinPlus};
 
-#[cfg(feature = "cuda")]
+#[cfg(any(feature = "cuda", feature = "cuda-tropical"))]
 pub use backend::Cuda;

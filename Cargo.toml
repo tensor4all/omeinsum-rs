@@ -1,6 +1,6 @@
 [package]
 name = "omeinsum"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 authors = ["Jinguo Liu <cacate0129@gmail.com>"]
 description = "High-performance Einstein summation with tropical and standard algebra support"
@@ -23,15 +23,28 @@ num-complex = { version = "0.4", features = ["bytemuck"] }
 # High-performance GEMM for Standard algebra
 faer = "0.24"
 
+# Cache-aware copies for materializing strided contraction operands
+strided-perm = "0.3"
+strided-view = "0.3"
+
 # Contraction order optimization
 omeco = "0.2.4"
 
-# Optional: Tropical algebra support (v0.2+ for column-major)
-tropical-gemm = { version = "0.2", optional = true }
+# Optional: Tropical algebra support. tropical-gemm and tropical-gemm-cuda must
+# resolve to the same crate version so the CPU and GPU tropical paths share one
+# set of semiring types (otherwise `TropicalMaxPlus<f32>` from each is a distinct,
+# incompatible type). 0.3.0 carries the column-major host API plus the forward
+# strided-batched GPU kernel used by the CUDA device path.
+tropical-gemm = { version = "0.3", optional = true }
 
-# Optional: CUDA support
-tropical-gemm-cuda = { version = "0.2", optional = true }
-cudarc = { version = "0.12", features = ["cuda-version-from-build-system"], optional = true }
+# Optional: CUDA support. tropical-gemm-cuda 0.3.0 depends on tropical-gemm 0.3.0
+# and cudarc ^0.19.7 — the cudarc pin below mirrors that exact requirement so
+# cargo unifies them into a single device/storage layer.
+tropical-gemm-cuda = { version = "0.3", optional = true }
+# cudarc 0.19.x is required to share a device zero-copy with tropical-gemm-cuda
+# (pre-1.0 semver: the exact minor must match the dep's). Feature set mirrors the
+# dep so cargo unifies them into a single build.
+cudarc = { version = "0.19.7", default-features = false, features = ["std", "driver", "nvrtc", "dynamic-loading", "cuda-version-from-build-system", "fallback-latest"], optional = true }
 
 # Optional: Parallelism
 rayon = { version = "1.8", optional = true }
@@ -56,11 +69,17 @@ tropical-kernels = ["tropical"]
 # Parallel execution
 parallel = ["rayon"]
 
-# CUDA backend (requires cuTENSOR 2.0+, see package.metadata.native-deps)
+# CUDA backend for standard algebra via cuTENSOR (requires cuTENSOR 2.0+, see
+# package.metadata.native-deps).
 cuda = ["dep:cudarc"]
 
+# Tropical contractions on GPU via tropical-gemm-cuda. Independent of cuTENSOR:
+# brings the cudarc device/storage layer + the tropical GPU kernels, so it builds
+# and runs without libcutensor present.
+cuda-tropical = ["dep:cudarc", "tropical", "dep:tropical-gemm-cuda"]
+
 # Convenience: all features
-full = ["tropical", "cuda"]
+full = ["tropical", "cuda", "cuda-tropical"]
 
 [[example]]
 name = "basic_einsum"
@@ -72,11 +91,20 @@ name = "tropical_network"
 path = "examples/tropical_network.rs"
 required-features = ["tropical"]
 
+[[example]]
+name = "tropical_network_gpu"
+path = "examples/tropical_network_gpu.rs"
+required-features = ["cuda-tropical"]
+
 [workspace]
 members = [".", "omeinsum-cli"]
 
 [[bench]]
 name = "binary"
+harness = false
+
+[[bench]]
+name = "complex_tdvp"
 harness = false
 
 [[bench]]

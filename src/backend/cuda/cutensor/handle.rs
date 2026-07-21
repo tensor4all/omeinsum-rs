@@ -6,22 +6,25 @@
 use super::sys::*;
 use super::{check, CutensorError};
 use crate::algebra::{Complex32, Complex64};
-use cudarc::driver::CudaDevice;
+use cudarc::driver::CudaStream;
 use std::sync::Arc;
 
 /// Safe wrapper for a cuTENSOR handle.
 ///
-/// Manages the lifetime of a cuTENSOR library handle and its associated CUDA device.
+/// Manages the lifetime of a cuTENSOR library handle and the CUDA stream its
+/// contractions run on. (cudarc 0.19 moved allocations and device-pointer
+/// extraction from the device onto the stream, so the handle owns a stream.)
 pub struct Handle {
     raw: cutensorHandle_t,
-    device: Arc<CudaDevice>,
+    stream: Arc<CudaStream>,
 }
 
 impl Handle {
-    /// Create a new cuTENSOR handle for the given CUDA device.
+    /// Create a new cuTENSOR handle bound to the given CUDA stream.
     ///
     /// # Arguments
-    /// * `device` - The CUDA device to use for cuTENSOR operations
+    /// * `stream` - The CUDA stream to allocate workspace on and launch
+    ///   contractions on
     ///
     /// # Returns
     /// * `Ok(Handle)` on success
@@ -30,10 +33,10 @@ impl Handle {
     /// # Version Requirements
     /// cuTENSOR 2.0+ is required. Version 1.x uses a different API and will fail
     /// at link time with undefined symbol errors for `cutensorContract`, etc.
-    pub fn new(device: Arc<CudaDevice>) -> Result<Self, CutensorError> {
+    pub fn new(stream: Arc<CudaStream>) -> Result<Self, CutensorError> {
         let mut raw = std::ptr::null_mut();
         check(unsafe { cutensorCreate(&mut raw) })?;
-        Ok(Self { raw, device })
+        Ok(Self { raw, stream })
     }
 
     /// Get the raw cuTENSOR handle pointer.
@@ -41,9 +44,9 @@ impl Handle {
         self.raw
     }
 
-    /// Get a reference to the associated CUDA device.
-    pub fn device(&self) -> &Arc<CudaDevice> {
-        &self.device
+    /// Get a reference to the CUDA stream this handle runs on.
+    pub fn stream(&self) -> &Arc<CudaStream> {
+        &self.stream
     }
 }
 

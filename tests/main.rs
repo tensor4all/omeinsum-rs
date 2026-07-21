@@ -9,6 +9,9 @@ mod coverage;
 #[cfg(feature = "cuda")]
 #[path = "suites/cuda.rs"]
 mod cuda;
+#[cfg(feature = "cuda-tropical")]
+#[path = "suites/cuda_tropical.rs"]
+mod cuda_tropical;
 #[path = "suites/einsum_core.rs"]
 mod einsum_core;
 #[path = "suites/integration.rs"]
