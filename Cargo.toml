@@ -1,6 +1,6 @@
 [package]
 name = "omeinsum"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2021"
 authors = ["Jinguo Liu <cacate0129@gmail.com>"]
 description = "High-performance Einstein summation with tropical and standard algebra support"
