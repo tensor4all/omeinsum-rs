@@ -23,6 +23,10 @@ num-complex = { version = "0.4", features = ["bytemuck"] }
 # High-performance GEMM for Standard algebra
 faer = "0.24"
 
+# Cache-aware copies for materializing strided contraction operands
+strided-perm = "0.3"
+strided-view = "0.3"
+
 # Contraction order optimization
 omeco = "0.2.4"
 
