@@ -1,10 +1,53 @@
 # omeinsum-rs
 
+> **Deprecated (2026-09-22).** This crate is superseded by
+> [tenferro-rs](https://github.com/tensor4all/tenferro-rs) and receives no new
+> features or fixes. The last release, `omeinsum` 0.1.2, stays on crates.io and
+> keeps working, but new work belongs in tenferro-rs — please file issues and
+> pull requests there.
+
 [![CI](https://github.com/tensor4all/omeinsum-rs/actions/workflows/ci.yml/badge.svg)](https://github.com/tensor4all/omeinsum-rs/actions/workflows/ci.yml)
 [![Coverage](https://img.shields.io/codecov/c/github/tensor4all/omeinsum-rs)](https://codecov.io/gh/tensor4all/omeinsum-rs)
 [![Docs](https://img.shields.io/badge/docs-latest-blue.svg)](https://tensor4all.github.io/omeinsum-rs/)
 
 Einstein summation for tropical and standard tensor networks in Rust. Inspired by [OMEinsum.jl](https://github.com/under-Peter/OMEinsum.jl).
+
+## Migrating to tenferro-rs
+
+| omeinsum-rs (0.1.x) | tenferro-rs |
+|---------------------|-------------|
+| `einsum::<Standard<T>, _, _>`, n-ary contractions | [`tenferro-einsum`](https://crates.io/crates/tenferro-einsum) 0.6+ (CPU/CUDA) |
+| `Einsum` + `optimize_greedy` / `optimize_treesa` | `tenferro-einsum`: `ContractionTree::optimize`, `ContractionOptimizerOptions` |
+| `MaxPlus` / `MinPlus` / `MaxMul` and argmax backward | `tenferro-tropical` (planned); today [`ext/tropical`](https://github.com/tensor4all/tenferro-rs/tree/main/ext/tropical) in-tree as `tenferro-ext-tropical` |
+| `GenericSemiring` (non-`Copy` semirings, e.g. configuration enumerators) | not ported yet |
+| tropical CUDA backend | not ported yet (`tenferro-gpu` has no tropical path) |
+| `omeinsum` CLI | no counterpart yet |
+
+Standard einsum and contraction-order optimization, `tenferro-einsum`:
+
+```rust
+use tenferro_cpu::CpuBackend;
+use tenferro_einsum::TensorEinsumExt;
+use tenferro_tensor::Tensor;
+
+let a = Tensor::from_vec_col_major(vec![2, 3], vec![1.0_f64; 6])?;
+let b = Tensor::from_vec_col_major(vec![3, 4], vec![1.0_f64; 12])?;
+let mut backend = CpuBackend::new();
+
+let out = [&a, &b].einsum("ij,jk->ik", &mut backend)?;
+```
+
+Tropical semirings are being moved out of this repository into the future
+`tenferro-tropical` crate. Until it is published, the in-tree
+[`ext/tropical`](https://github.com/tensor4all/tenferro-rs/tree/main/ext/tropical)
+crate covers CPU fused binary contractions with argmax, traced wrappers and AD
+rules:
+
+```rust
+use tenferro_ext_tropical::{einsum::tropical_einsum_with_argmax, TropicalKind};
+
+let out = tropical_einsum_with_argmax(TropicalKind::MaxPlus, &[&a, &b], "ij,jk->ik")?;
+```
 
 ## Features
 

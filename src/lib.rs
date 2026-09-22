@@ -1,5 +1,13 @@
 //! # OMEinsum-rs
 //!
+//! **Deprecated:** this crate is superseded by
+//! [tenferro-rs](https://github.com/tensor4all/tenferro-rs) and receives no new
+//! features or fixes. Standard einsum moved to `tenferro-einsum`; the tropical
+//! path is moving to the future `tenferro-tropical` crate and is available
+//! today in-tree as `tenferro-ext-tropical`. See
+//! [Migrating to tenferro-rs](https://github.com/tensor4all/omeinsum-rs#migrating-to-tenferro-rs)
+//! for the mapping.
+//!
 //! High-performance Einstein summation with support for both tropical and standard algebras.
 //!
 //! ## Features
