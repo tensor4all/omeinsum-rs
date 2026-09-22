@@ -1,9 +1,9 @@
 [package]
 name = "omeinsum"
-version = "0.1.2"
+version = "0.1.3"
 edition = "2021"
 authors = ["Jinguo Liu <cacate0129@gmail.com>"]
-description = "High-performance Einstein summation with tropical and standard algebra support"
+description = "Deprecated — use tenferro-rs (tenferro-einsum / tenferro-tropical). High-performance Einstein summation with tropical and standard algebra support"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/tensor4all/omeinsum-rs"
 keywords = ["einsum", "tensor", "tropical", "autodiff", "contraction"]
